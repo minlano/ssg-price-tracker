@@ -1,0 +1,50 @@
+# 팀원 D가 작성할 CI/CD 파이프라인 템플릿
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+        
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '16'
+        
+    - name: Install Python dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+        
+    - name: Install Node dependencies
+      run: |
+        cd frontend
+        npm install
+        
+    - name: Run Python tests
+      run: |
+        cd backend
+        python -m pytest
+        
+    - name: Run Node tests
+      run: |
+        cd frontend
+        npm test
+        
+    - name: Build frontend
+      run: |
+        cd frontend
+        npm run build
