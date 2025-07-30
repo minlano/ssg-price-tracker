@@ -50,6 +50,8 @@ function ProductSearch({ onProductAdd }) {
     }
   };
 
+
+
   const handleAddProduct = async (product) => {
     try {
       const response = await fetch('/api/products/add-from-search', {
