@@ -7,13 +7,21 @@ function ProductSearch({ onProductAdd }) {
   const [isSearching, setIsSearching] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareResults, setCompareResults] = useState(null);
+  // ========== 네이버 쇼핑 상태 시작 ==========
+  const [selectedSource, setSelectedSource] = useState('SSG'); // 'SSG' 또는 'NAVER'
+  // ========== 네이버 쇼핑 상태 끝 ==========
 
+  // ========== 네이버 쇼핑 검색 함수 시작 ==========
   const handleSearch = async () => {
     if (!keyword.trim()) return;
     
     setIsSearching(true);
     try {
-      const response = await fetch(`/api/search?keyword=${encodeURIComponent(keyword)}&limit=20`);
+      const apiUrl = selectedSource === 'NAVER' 
+        ? `/api/naver/search?keyword=${encodeURIComponent(keyword)}&limit=20`
+        : `/api/search?keyword=${encodeURIComponent(keyword)}&limit=20`;
+      
+      const response = await fetch(apiUrl);
       const data = await response.json();
       
       if (response.ok) {
@@ -28,13 +36,19 @@ function ProductSearch({ onProductAdd }) {
       setIsSearching(false);
     }
   };
+  // ========== 네이버 쇼핑 검색 함수 끝 ==========
 
+  // ========== 네이버 쇼핑 가격 비교 함수 시작 ==========
   const handleCompare = async () => {
     if (!keyword.trim()) return;
     
     setIsComparing(true);
     try {
-      const response = await fetch(`/api/compare?keyword=${encodeURIComponent(keyword)}&limit=10`);
+      const apiUrl = selectedSource === 'NAVER' 
+        ? `/api/naver/compare?keyword=${encodeURIComponent(keyword)}&limit=10`
+        : `/api/compare?keyword=${encodeURIComponent(keyword)}&limit=10`;
+      
+      const response = await fetch(apiUrl);
       const data = await response.json();
       
       if (response.ok) {
@@ -49,23 +63,34 @@ function ProductSearch({ onProductAdd }) {
       setIsComparing(false);
     }
   };
+  // ========== 네이버 쇼핑 가격 비교 함수 끝 ==========
 
 
 
+  // ========== 네이버 쇼핑 상품 추가 함수 시작 ==========
   const handleAddProduct = async (product) => {
     try {
-      const response = await fetch('/api/products/add-from-search', {
+      const apiUrl = selectedSource === 'NAVER' 
+        ? '/api/naver/products/add-from-search'
+        : '/api/products/add-from-search';
+      
+      // 네이버 쇼핑의 경우 current_price 필드 사용
+      const productData = selectedSource === 'NAVER' 
+        ? { ...product, current_price: product.current_price || product.price }
+        : product;
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(product),
+        body: JSON.stringify(productData),
       });
       
       const data = await response.json();
       
       if (response.ok) {
-        alert('상품이 추가되었습니다!');
+        alert(`${selectedSource} 상품이 추가되었습니다!`);
         if (onProductAdd) onProductAdd(data.product);
       } else {
         alert(data.error || '상품 추가 중 오류가 발생했습니다.');
@@ -75,24 +100,41 @@ function ProductSearch({ onProductAdd }) {
       alert('상품 추가 중 오류가 발생했습니다.');
     }
   };
+  // ========== 네이버 쇼핑 상품 추가 함수 끝 ==========
 
   return (
     <div className="product-search">
       <div className="search-header">
         <h3>🔍 상품 검색</h3>
         <div className="search-controls">
+          {/* ========== 네이버 쇼핑 UI 시작 ========== */}
+          <div className="source-selector">
+            <button 
+              className={`source-btn ${selectedSource === 'SSG' ? 'active' : ''}`}
+              onClick={() => setSelectedSource('SSG')}
+            >
+              🛒 SSG
+            </button>
+            <button 
+              className={`source-btn ${selectedSource === 'NAVER' ? 'active' : ''}`}
+              onClick={() => setSelectedSource('NAVER')}
+            >
+              🔍 네이버쇼핑
+            </button>
+          </div>
+          {/* ========== 네이버 쇼핑 UI 끝 ========== */}
           <input
             type="text"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="검색할 상품명을 입력하세요"
+            placeholder={`${selectedSource === 'NAVER' ? '네이버쇼핑' : 'SSG'}에서 검색할 상품명을 입력하세요`}
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
           />
           <button onClick={handleSearch} disabled={isSearching}>
-            {isSearching ? '검색 중...' : '검색'}
+            {isSearching ? '검색 중...' : `${selectedSource} 검색`}
           </button>
           <button onClick={handleCompare} disabled={isComparing}>
-            {isComparing ? '비교 중...' : '가격 비교'}
+            {isComparing ? '비교 중...' : `${selectedSource} 가격 비교`}
           </button>
         </div>
       </div>
@@ -121,7 +163,11 @@ function ProductSearch({ onProductAdd }) {
                 )}
                 <div className="product-info">
                   <h5>{product.name}</h5>
-                  <p className="price">{product.price?.toLocaleString()}원</p>
+                  {/* ========== 네이버 쇼핑 가격 표시 시작 ========== */}
+                  <p className="price">
+                    {(product.current_price || product.price)?.toLocaleString()}원
+                  </p>
+                  {/* ========== 네이버 쇼핑 가격 표시 끝 ========== */}
                   <p className="brand">{product.brand}</p>
                   <button 
                     onClick={() => handleAddProduct(product)}

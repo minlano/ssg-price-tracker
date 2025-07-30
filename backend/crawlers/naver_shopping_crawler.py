@@ -250,49 +250,106 @@ class NaverShoppingCrawler:
             print(f"데이터베이스 조회 오류: {e}")
             return []
     
-    def search_and_save(self, keyword, limit=20):
-        """상품 검색 후 데이터베이스에 저장"""
-        print(f"네이버 쇼핑에서 '{keyword}' 검색 중...")
-        products = self.search_products(keyword, limit)
-        
-        saved_count = 0
-        for product in products:
-            if self.save_product(product):
-                saved_count += 1
-        
-        print(f"총 {len(products)}개 상품 중 {saved_count}개 저장 완료")
-        return products
+    def add_product_from_search(self, product_data):
+        """검색 결과에서 선택한 상품만 데이터베이스에 저장 (SSG 방식과 동일)"""
+        return self.save_product(product_data)
 
-def test_naver_shopping_crawler():
-    """네이버 쇼핑 크롤러 테스트"""
+def search_naver_products(keyword, limit=20):
+    """네이버 쇼핑 상품 검색 (SSG 방식과 동일 - 검색만 하고 저장 안함)"""
+    try:
+        crawler = NaverShoppingCrawler()
+        return crawler.search_products(keyword, limit)
+    except Exception as e:
+        print(f"네이버 쇼핑 검색 오류: {e}")
+        return []
+
+def compare_naver_products(keyword, limit=10):
+    """네이버 쇼핑 상품 가격 비교 (SSG 방식과 동일)"""
+    try:
+        products = search_naver_products(keyword, limit)
+        
+        if not products:
+            return []
+        
+        # 가격순 정렬
+        products_sorted = sorted(products, key=lambda x: x['current_price'] if x['current_price'] > 0 else float('inf'))
+        
+        # 가격 비교 정보 추가
+        for i, product in enumerate(products_sorted):
+            if i == 0 and product['current_price'] > 0:
+                product['price_rank'] = '최저가'
+                product['price_diff'] = 0
+            elif product['current_price'] > 0:
+                lowest_price = products_sorted[0]['current_price']
+                product['price_diff'] = product['current_price'] - lowest_price
+                product['price_rank'] = f"{i+1}위"
+            else:
+                product['price_rank'] = '가격 정보 없음'
+                product['price_diff'] = 0
+        
+        return products_sorted
+        
+    except Exception as e:
+        print(f"네이버 쇼핑 가격 비교 오류: {e}")
+        return []
+
+def test_search():
+    """검색 기능 테스트 (SSG 방식과 동일)"""
+    keyword = "무선이어폰"
+    print(f"네이버 쇼핑 '{keyword}' 검색 결과:")
+    products = search_naver_products(keyword, limit=3)
+    
+    for i, product in enumerate(products, 1):
+        print(f"{i}. {product['name'][:50]}...")
+        print(f"   가격: {product['current_price']:,}원")
+        print(f"   브랜드: {product['brand']}")
+        print(f"   URL: {product['url'][:80]}...")
+        print()
+
+def test_compare():
+    """가격 비교 테스트 (SSG 방식과 동일)"""
+    keyword = "스마트폰 거치대"
+    print(f"네이버 쇼핑 '{keyword}' 가격 비교:")
+    products = compare_naver_products(keyword, limit=3)
+    
+    for product in products:
+        print(f"[{product['price_rank']}] {product['name'][:50]}...")
+        print(f"가격: {product['current_price']:,}원 (+{product['price_diff']:,}원)")
+        print(f"브랜드: {product['brand']}")
+        print()
+
+def test_add_product():
+    """상품 추가 테스트 (SSG 방식과 동일)"""
     try:
         crawler = NaverShoppingCrawler()
         
-        # 검색 테스트
-        print("=== 네이버 쇼핑 크롤러 테스트 ===")
-        keyword = "라면"
-        products = crawler.search_and_save(keyword, limit=5)
+        # 검색 후 첫 번째 상품을 수동으로 추가
+        keyword = "무선마우스"
+        products = search_naver_products(keyword, limit=1)
         
-        print(f"\n검색 결과 ({len(products)}개):")
-        for i, product in enumerate(products, 1):
-            print(f"{i}. {product['name'][:50]}...")
-            print(f"   가격: {product['current_price']:,}원")
-            print(f"   쇼핑몰: {product['brand']}")
-            print(f"   소스: {product['source']}")
-            print(f"   URL: {product['url'][:80]}...")
-            print()
-        
-        # 데이터베이스 조회 테스트
-        print("=== 데이터베이스 저장된 상품 ===")
-        saved_products = crawler.get_products_from_db(limit=10)
-        print(f"저장된 상품 수: {len(saved_products)}개")
-        
-    except ValueError as e:
-        print(f"설정 오류: {e}")
-        print("1. .env 파일에 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 설정하세요.")
-        print("2. pip install python-dotenv 명령어로 dotenv를 설치하세요.")
+        if products:
+            product = products[0]
+            print(f"상품 추가 테스트: {product['name'][:50]}...")
+            
+            success = crawler.add_product_from_search(product)
+            if success:
+                print("✅ 상품이 성공적으로 추가되었습니다!")
+                
+                # 저장된 상품 확인
+                saved_products = crawler.get_products_from_db(limit=5)
+                print(f"현재 저장된 상품 수: {len(saved_products)}개")
+            else:
+                print("❌ 상품 추가에 실패했습니다.")
+        else:
+            print("검색 결과가 없습니다.")
+            
     except Exception as e:
-        print(f"테스트 오류: {e}")
+        print(f"상품 추가 테스트 오류: {e}")
 
 if __name__ == '__main__':
-    test_naver_shopping_crawler()
+    print("=== 네이버 쇼핑 검색 테스트 ===")
+    test_search()
+    print("\n=== 네이버 쇼핑 가격 비교 테스트 ===")
+    test_compare()
+    print("\n=== 네이버 쇼핑 상품 추가 테스트 ===")
+    test_add_product()
