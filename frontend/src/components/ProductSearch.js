@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './ProductSearch.css';
+import ProductDetail from './ProductDetail';
 
 function ProductSearch({ onProductAdd }) {
   const [keyword, setKeyword] = useState('');
@@ -10,6 +11,7 @@ function ProductSearch({ onProductAdd }) {
   // ========== 네이버 쇼핑 상태 시작 ==========
   const [selectedSource, setSelectedSource] = useState('SSG'); // 'SSG' 또는 'NAVER'
   // ========== 네이버 쇼핑 상태 끝 ==========
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
   // ========== 네이버 쇼핑 검색 함수 시작 ==========
   const handleSearch = async () => {
@@ -102,6 +104,14 @@ function ProductSearch({ onProductAdd }) {
   };
   // ========== 네이버 쇼핑 상품 추가 함수 끝 ==========
 
+  const handleProductClick = (product) => {
+    setSelectedProduct(product);
+  };
+
+  const handleCloseDetail = () => {
+    setSelectedProduct(null);
+  };
+
   return (
     <div className="product-search">
       <div className="search-header">
@@ -157,10 +167,15 @@ function ProductSearch({ onProductAdd }) {
           <h4>검색 결과 ({searchResults.length}개)</h4>
           <div className="products-grid">
             {searchResults.map((product, index) => (
-              <div key={index} className="product-card">
-                {product.image_url && (
-                  <img src={product.image_url} alt={product.name} />
-                )}
+              <div key={index} className="product-card" onClick={() => handleProductClick(product)}>
+                <img 
+                  src={product.image_url} 
+                  alt={product.name}
+                  onError={(e) => {
+                    // 이미지 로딩 실패 시 기본 이미지로 대체
+                    e.target.src = `https://via.placeholder.com/300x200/4A90E2/FFFFFF?text=${encodeURIComponent(product.name)}`;
+                  }}
+                />
                 <div className="product-info">
                   <h5>{product.name}</h5>
                   {/* ========== 네이버 쇼핑 가격 표시 시작 ========== */}
@@ -169,17 +184,39 @@ function ProductSearch({ onProductAdd }) {
                   </p>
                   {/* ========== 네이버 쇼핑 가격 표시 끝 ========== */}
                   <p className="brand">{product.brand}</p>
-                  <button 
-                    onClick={() => handleAddProduct(product)}
-                    className="add-btn"
-                  >
-                    추적 목록에 추가
-                  </button>
+                  <div className="product-actions">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAddProduct(product);
+                      }}
+                      className="add-btn"
+                    >
+                      추적 목록에 추가
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleProductClick(product);
+                      }}
+                      className="view-detail-btn"
+                    >
+                      상세보기
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         </div>
+      )}
+
+      {selectedProduct && (
+        <ProductDetail
+          product={selectedProduct}
+          onClose={handleCloseDetail}
+          onAddToTracking={handleAddProduct}
+        />
       )}
     </div>
   );

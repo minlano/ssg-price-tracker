@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS products (
     current_price INTEGER,
     image_url TEXT,
     brand TEXT,
+    description TEXT,
     source TEXT DEFAULT 'SSG',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

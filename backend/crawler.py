@@ -26,118 +26,376 @@ def get_headers():
     }
 
 def search_ssg_products_legacy(keyword, page=1, limit=20):
-    """SSG에서 상품 검색 (최적화된 고속 버전)"""
+    """SSG에서 상품 검색 (개선된 버전)"""
     try:
         encoded_keyword = quote(keyword)
         search_url = f"https://www.ssg.com/search.ssg?target=all&query={encoded_keyword}&page={page}"
         
         headers = get_headers()
-        response = requests.get(search_url, headers=headers, timeout=5)  # 타임아웃 더 단축
+        response = requests.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
         products = []
         
-        # 상품 링크 찾기 최적화 - 더 구체적인 선택자 사용
-        product_links = soup.select('a[href*="itemView.ssg"][href*="itemId="]')
+        print(f"🔍 SSG 검색 페이지 접근 성공: {search_url}")
         
-        # 광고 링크 제외 (강화된 버전)
-        filtered_links = []
-        for link in product_links[:limit * 5]:  # 더 많은 링크 확인
-            href = link.get('href', '')
-            link_text = link.get_text(strip=True)
-            
-            # 광고 링크 제외 조건 강화
-            if ('advertBidId' not in href and 
-                'ADAD' not in link_text and
-                'advertExtensTeryDivCd' not in href):
-                filtered_links.append(link)
-                if len(filtered_links) >= limit * 2:  # 필요한 만큼만 수집
-                    break
+        # 실제 SSG 상품 선택자들 (실제 사이트 구조 기반)
+        product_selectors = [
+            '.cunit_prod',  # SSG 메인 상품 컨테이너
+            '.cunit_item',  # 상품 아이템
+            '.prod_item',   # 상품 아이템 대체
+            '.item_thmb',   # 썸네일 컨테이너
+            'div[class*="cunit"]',  # cunit 관련 클래스
+            '[data-item-id]'  # 데이터 속성 기반
+        ]
         
-        print(f"유효한 상품 링크 {len(filtered_links)}개 발견")
+        product_elements = []
+        for selector in product_selectors:
+            elements = soup.select(selector)
+            if elements:
+                print(f"✅ 선택자 '{selector}'로 {len(elements)}개 상품 발견")
+                product_elements = elements
+                break
         
-        # 상품 정보 추출 (더 빠른 처리)
-        processed_urls = set()
+        if not product_elements:
+            print("⚠️ 상품 요소를 찾을 수 없습니다. 링크 기반으로 시도합니다.")
+            # 링크 기반 폴백
+            product_links = soup.select('a[href*="itemView.ssg"]')
+            for link in product_links[:limit * 2]:
+                href = link.get('href', '')
+                if 'itemId=' in href and 'advertBidId' not in href:
+                    product_elements.append(link.parent or link)
         
-        for link in filtered_links:
+        print(f"📦 총 {len(product_elements)}개 상품 요소 발견")
+        
+        # 상품 정보 추출
+        for element in product_elements[:limit * 2]:
             if len(products) >= limit:
                 break
                 
             try:
-                href = link.get('href')
-                if href.startswith('/'):
-                    product_url = f"https://www.ssg.com{href}"
-                else:
-                    product_url = href
-                
-                # 중복 제거
-                if product_url in processed_urls:
-                    continue
-                processed_urls.add(product_url)
-                
-                # 상품명 추출 (간소화된 로직)
-                name = extract_product_name_fast(link, keyword)
-                
-                # 가격 추출 (간소화) - 최대 3단계만 확인
-                price = 0
-                current = link.parent
-                for _ in range(3):  # 단계 축소
-                    if current:
-                        price_text = current.get_text()
-                        price = extract_price_fast(price_text)
-                        if price > 0:
-                            break
-                        current = current.parent
-                    else:
-                        break
-                
-                # 브랜드 정보 추출 (간소화)
-                brand = extract_brand_fast(link, name)
-                
-                # 이미지 찾기 (간소화) - 최대 2단계만 확인
-                image_url = None
-                current = link.parent
-                for _ in range(2):  # 단계 축소
-                    if current:
-                        img = current.find('img')
-                        if img:
-                            image_url = img.get('src') or img.get('data-src')
-                            if image_url:
-                                if image_url.startswith('//'):
-                                    image_url = f"https:{image_url}"
-                                elif image_url.startswith('/'):
-                                    image_url = f"https://www.ssg.com{image_url}"
-                                break
-                        current = current.parent
-                    else:
-                        break
-                
-                # 상품 정보 추가
-                products.append({
-                    'name': name.strip(),
-                    'price': price,
-                    'url': product_url,
-                    'image_url': image_url,
-                    'brand': brand,
-                    'source': 'SSG'
-                })
-                
+                product_info = extract_ssg_product_info(element, keyword)
+                if product_info and product_info.get('name') and len(product_info['name']) > 5:
+                    products.append(product_info)
+                    print(f"✅ 상품 추출: {product_info['name'][:50]}...")
+                    
             except Exception as e:
-                continue  # 오류 출력 제거로 속도 향상
+                print(f"⚠️ 상품 정보 추출 실패: {e}")
+                continue
         
-        print(f"최종 추출된 상품: {len(products)}개")
+        print(f"🎯 최종 추출된 상품: {len(products)}개")
         
-        # 결과가 없으면 더미 데이터 생성
-        if not products:
-            print("실제 검색 결과가 없어 테스트 데이터를 생성합니다.")
-            products = create_dummy_products(keyword, limit)
+        # 결과가 부족하면 더미 데이터로 보완
+        if len(products) < limit // 2:
+            print("📝 결과가 부족하여 테스트 데이터로 보완합니다.")
+            dummy_products = create_dummy_products(keyword, limit - len(products))
+            products.extend(dummy_products)
         
         return products[:limit]
         
     except Exception as e:
-        print(f"검색 오류: {e}")
+        print(f"❌ SSG 검색 오류: {e}")
         return create_dummy_products(keyword, limit)
+
+def extract_ssg_product_info(element, keyword):
+    """SSG 상품 요소에서 정보 추출 (개선된 버전)"""
+    try:
+        # 1. 상품 URL 찾기
+        product_url = None
+        link = element.find('a', href=re.compile(r'itemView\.ssg.*itemId='))
+        if link:
+            href = link.get('href', '')
+            if href.startswith('/'):
+                product_url = f"https://www.ssg.com{href}"
+            else:
+                product_url = href
+        
+        if not product_url:
+            return None
+        
+        # 2. 상품명 추출 (개선된 로직)
+        name = None
+        
+        # 먼저 개별 상품 페이지에서 정확한 상품명 가져오기
+        if product_url:
+            try:
+                page_response = requests.get(product_url, headers=get_headers(), timeout=5)
+                if page_response.status_code == 200:
+                    page_soup = BeautifulSoup(page_response.content, 'html.parser')
+                    
+                    # SSG 상품 페이지의 정확한 상품명 선택자
+                    page_name_selectors = [
+                        'h2.cdtl_prd_nm',
+                        'h1.cdtl_prd_nm',
+                        '.prod_tit',
+                        'title'
+                    ]
+                    
+                    for selector in page_name_selectors:
+                        name_elem = page_soup.select_one(selector)
+                        if name_elem:
+                            candidate_name = name_elem.get_text(strip=True)
+                            if candidate_name and candidate_name != "SSG.COM" and len(candidate_name) > 10:
+                                name = candidate_name
+                                break
+                    
+                    if name:
+                        print(f"✅ 개별 페이지에서 상품명 추출: {name[:50]}...")
+            except:
+                pass  # 실패해도 계속 진행
+        
+        # 개별 페이지에서 실패하면 검색 페이지에서 추출
+        if not name:
+            name_selectors = [
+                '.cunit_tit a',           # SSG 메인 상품명
+                '.cunit_info .item_tit',  # 상품 정보 제목
+                '.prod_tit',              # 상품 제목
+                '.item_tit',              # 아이템 제목
+                '.cunit_prod .tit',       # 유닛 제목
+                'a[href*="itemView"]'     # 링크 텍스트
+            ]
+            
+            for selector in name_selectors:
+                name_elem = element.select_one(selector)
+                if name_elem:
+                    candidate_name = name_elem.get_text(strip=True)
+                    if candidate_name and len(candidate_name) > 5 and not is_generic_product_text(candidate_name):
+                        name = candidate_name
+                        break
+            
+            # 상품명이 없으면 전체 텍스트에서 추출
+            if not name:
+                all_text = element.get_text(strip=True)
+                lines = [line.strip() for line in all_text.split('\n') if line.strip()]
+                for line in lines:
+                    if (len(line) > 10 and 
+                        keyword.lower() in line.lower() and 
+                        not is_generic_product_text(line)):
+                        name = line
+                        break
+                
+                if not name and lines:
+                    # 첫 번째 의미있는 라인 선택
+                    for line in lines:
+                        if len(line) > 10 and not is_generic_product_text(line):
+                            name = line
+                            break
+                    
+                    if not name:
+                        name = f"{keyword} 상품"
+        
+        # 3. 가격 추출 (개선된 로직)
+        price = 0
+        
+        # 먼저 개별 상품 페이지에서 정확한 가격 가져오기
+        if product_url:
+            try:
+                page_response = requests.get(product_url, headers=get_headers(), timeout=5)
+                if page_response.status_code == 200:
+                    page_soup = BeautifulSoup(page_response.content, 'html.parser')
+                    
+                    # SSG 상품 페이지의 정확한 가격 선택자
+                    page_price_selectors = [
+                        '.cdtl_price .blind',      # 상세 페이지 가격 (숨김 텍스트)
+                        '.cdtl_old_price .blind',  # 원가
+                        '.price_original',         # 원가
+                        '.price_discount',         # 할인가
+                        '.ssg_price'              # SSG 가격
+                    ]
+                    
+                    for selector in page_price_selectors:
+                        price_elem = page_soup.select_one(selector)
+                        if price_elem:
+                            price_text = price_elem.get_text(strip=True)
+                            price_matches = re.findall(r'(\d{1,3}(?:,\d{3})*)', price_text)
+                            if price_matches:
+                                try:
+                                    candidate_price = int(price_matches[0].replace(',', ''))
+                                    if 1000 <= candidate_price <= 50000000:
+                                        price = candidate_price
+                                        print(f"✅ 개별 페이지에서 가격 추출: {price:,}원")
+                                        break
+                                except:
+                                    continue
+                    
+                    if price > 0:
+                        pass  # 가격을 찾았으므로 검색 페이지에서는 찾지 않음
+            except:
+                pass  # 실패해도 계속 진행
+        
+        # 개별 페이지에서 실패하면 검색 페이지에서 추출
+        if price == 0:
+            price_selectors = [
+                '.cunit_price .blind',     # SSG 가격 (숨김 텍스트)
+                '.price_original',         # 원가
+                '.price_discount',         # 할인가
+                '.ssg_price',             # SSG 가격
+                '.price',                 # 일반 가격
+                '[class*="price"]'        # 가격 관련 클래스
+            ]
+            
+            for selector in price_selectors:
+                price_elem = element.select_one(selector)
+                if price_elem:
+                    price_text = price_elem.get_text(strip=True)
+                    price_matches = re.findall(r'(\d{1,3}(?:,\d{3})*)', price_text)
+                    if price_matches:
+                        try:
+                            candidate_price = int(price_matches[0].replace(',', ''))
+                            if 1000 <= candidate_price <= 50000000:
+                                price = candidate_price
+                                break
+                        except:
+                            continue
+            
+            # 가격이 없으면 전체 텍스트에서 찾기
+            if price == 0:
+                all_text = element.get_text()
+                price_matches = re.findall(r'(\d{1,3}(?:,\d{3})*)\s*원', all_text)
+                if price_matches:
+                    for match in price_matches:
+                        try:
+                            candidate_price = int(match.replace(',', ''))
+                            if 1000 <= candidate_price <= 50000000:
+                                price = candidate_price
+                                break
+                        except:
+                            continue
+        
+        # 4. 이미지 URL 추출
+        image_url = None
+        img_selectors = [
+            '.cunit_img img',         # SSG 상품 이미지
+            '.prod_img img',          # 상품 이미지
+            '.item_img img',          # 아이템 이미지
+            'img'                     # 모든 이미지
+        ]
+        
+        for selector in img_selectors:
+            img_elem = element.select_one(selector)
+            if img_elem:
+                image_url = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-original')
+                if image_url:
+                    if image_url.startswith('//'):
+                        image_url = f"https:{image_url}"
+                    elif image_url.startswith('/'):
+                        image_url = f"https://www.ssg.com{image_url}"
+                    
+                    # 유효한 이미지 URL인지 확인
+                    if any(ext in image_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                        break
+                    else:
+                        image_url = None
+        
+        # 5. 브랜드 추출
+        brand = extract_brand_from_element(element, name or "")
+        
+        # 6. 상품명 정제
+        if name:
+            name = clean_product_name(name)
+        else:
+            name = f"{keyword} 관련 상품"
+        
+        return {
+            'name': name,
+            'price': price,
+            'url': product_url,
+            'image_url': image_url,
+            'brand': brand,
+            'source': 'SSG'
+        }
+        
+    except Exception as e:
+        print(f"⚠️ 상품 정보 추출 중 오류: {e}")
+        return None
+
+def extract_brand_from_element(element, product_name):
+    """요소에서 브랜드 정보 추출"""
+    try:
+        # 1. 브랜드 관련 클래스에서 찾기
+        brand_selectors = [
+            '.cunit_brand',           # SSG 브랜드
+            '.brand_name',            # 브랜드명
+            '.brand',                 # 브랜드
+            '.maker',                 # 제조사
+            '.vendor'                 # 판매자
+        ]
+        
+        for selector in brand_selectors:
+            brand_elem = element.select_one(selector)
+            if brand_elem:
+                brand_text = brand_elem.get_text(strip=True)
+                if brand_text and len(brand_text) < 50:
+                    return brand_text
+        
+        # 2. 상품명에서 브랜드 추출
+        if product_name:
+            known_brands = [
+                'APPLE', '삼성', 'SAMSUNG', 'LG', '나이키', 'NIKE', 
+                '아디다스', 'ADIDAS', '농심', '오뚜기', '삼양'
+            ]
+            
+            product_upper = product_name.upper()
+            for brand in known_brands:
+                if brand.upper() in product_upper:
+                    return brand
+            
+            # 첫 단어가 브랜드일 가능성
+            first_word = product_name.split()[0] if product_name.split() else ''
+            if first_word and 2 < len(first_word) < 20:
+                return first_word
+        
+        return '브랜드 정보 없음'
+        
+    except Exception:
+        return '브랜드 정보 없음'
+
+def is_generic_product_text(text):
+    """일반적인/의미없는 상품 텍스트인지 확인"""
+    if not text:
+        return True
+    
+    text_lower = text.lower()
+    
+    # 의미없는 텍스트 패턴들
+    generic_patterns = [
+        '함께 보면 좋은',
+        '관련 상품',
+        '추천 상품',
+        '인기 상품',
+        '베스트',
+        '할인',
+        '무료배송',
+        '당일배송',
+        '리뷰',
+        '별점',
+        '평점',
+        '더보기',
+        '자세히',
+        '상품정보',
+        '상품상세',
+        '브랜드 전체보기',
+        '검색 필터',
+        '정렬',
+        '가격대',
+        '배송비',
+        '적립금'
+    ]
+    
+    for pattern in generic_patterns:
+        if pattern in text_lower:
+            return True
+    
+    # 너무 짧거나 숫자만 있는 경우
+    if len(text) < 5 or text.isdigit():
+        return True
+    
+    # 특수문자만 있는 경우
+    if re.match(r'^[^\w가-힣]+$', text):
+        return True
+    
+    return False
 
 def create_dummy_products(keyword, limit=5):
     """테스트용 더미 상품 데이터 생성"""
@@ -160,10 +418,10 @@ def create_dummy_products(keyword, limit=5):
     return dummy_products
 
 def crawl_ssg_product(url):
-    """SSG 상품 정보 크롤링 (기존 함수 개선)"""
+    """SSG 상품 정보 크롤링 (개선된 버전)"""
     try:
         headers = get_headers()
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -188,41 +446,144 @@ def crawl_ssg_product(url):
         if not name:
             name = "상품명 없음"
         
-        # 가격 추출 (개선된 패턴)
-        price_selectors = [
-            '.cdtl_old_price .blind',
-            '.cdtl_price .blind',
-            '.price_original',
-            '.price_discount',
-            '.ssg_price',
-            '.price'
+        # 가격 추출 (대폭 개선된 패턴)
+        price = 0
+        
+        # 1. 메인 가격 선택자들 (실제 SSG 구조 기반)
+        main_price_selectors = [
+            '.cdtl_price .blind',      # 메인 가격 (숨김 텍스트)
+            '.cdtl_old_price .blind',  # 원가 (숨김 텍스트)
+            '.price_original',         # 원가
+            '.price_discount',         # 할인가
+            '.ssg_price',             # SSG 가격
+            '.price'                  # 일반 가격
         ]
         
-        price = 0
-        for selector in price_selectors:
+        for selector in main_price_selectors:
             price_element = soup.select_one(selector)
             if price_element:
                 price_text = price_element.get_text(strip=True)
-                price_match = re.search(r'(\d{1,3}(?:,\d{3})*)', price_text.replace(',', ''))
-                if price_match:
-                    price = int(price_match.group(1).replace(',', ''))
+                # 여러 가격 패턴 시도
+                price_patterns = [
+                    r'판매가격\s*(\d{1,3}(?:,\d{3})*)',
+                    r'정상가격\s*(\d{1,3}(?:,\d{3})*)',
+                    r'할인가\s*(\d{1,3}(?:,\d{3})*)',
+                    r'(\d{1,3}(?:,\d{3})*)\s*원',
+                    r'(\d{1,3}(?:,\d{3})*)'
+                ]
+                
+                for pattern in price_patterns:
+                    price_matches = re.findall(pattern, price_text)
+                    if price_matches:
+                        try:
+                            candidate_price = int(price_matches[0].replace(',', ''))
+                            if 1000 <= candidate_price <= 50000000:  # 합리적인 가격 범위
+                                price = candidate_price
+                                print(f"✅ 가격 추출 성공: {price:,}원 (선택자: {selector})")
+                                break
+                        except:
+                            continue
+                
+                if price > 0:
                     break
         
-        # 이미지 URL 추출
+        # 2. 가격을 찾지 못했으면 전체 페이지에서 검색
+        if price == 0:
+            print("⚠️ 메인 선택자에서 가격을 찾지 못함. 전체 페이지 검색 중...")
+            page_text = soup.get_text()
+            
+            # 더 광범위한 가격 패턴
+            comprehensive_patterns = [
+                r'판매가격[:\s]*(\d{1,3}(?:,\d{3})*)',
+                r'정상가격[:\s]*(\d{1,3}(?:,\d{3})*)',
+                r'할인가[:\s]*(\d{1,3}(?:,\d{3})*)',
+                r'가격[:\s]*(\d{1,3}(?:,\d{3})*)',
+                r'(\d{1,3}(?:,\d{3})*)\s*원',
+                r'₩\s*(\d{1,3}(?:,\d{3})*)',
+                r'KRW\s*(\d{1,3}(?:,\d{3})*)'
+            ]
+            
+            all_prices = []
+            for pattern in comprehensive_patterns:
+                matches = re.findall(pattern, page_text)
+                for match in matches:
+                    try:
+                        candidate_price = int(match.replace(',', ''))
+                        if 10000 <= candidate_price <= 10000000:  # 더 넓은 범위
+                            all_prices.append(candidate_price)
+                    except:
+                        continue
+            
+            if all_prices:
+                # 가격들을 정렬하고 중간값 선택 (이상치 제거)
+                all_prices.sort()
+                if len(all_prices) == 1:
+                    price = all_prices[0]
+                else:
+                    # 중간값들 중에서 선택
+                    mid_start = len(all_prices) // 3
+                    mid_end = len(all_prices) * 2 // 3
+                    mid_prices = all_prices[mid_start:mid_end] if mid_end > mid_start else all_prices
+                    price = mid_prices[0] if mid_prices else all_prices[0]
+                
+                print(f"✅ 전체 페이지에서 가격 추출: {price:,}원")
+        
+        # 3. 여전히 가격이 없으면 스크립트 태그에서 찾기
+        if price == 0:
+            print("⚠️ 스크립트 태그에서 가격 검색 중...")
+            script_tags = soup.find_all('script')
+            for script in script_tags:
+                if script.string:
+                    script_text = script.string
+                    # JSON 데이터에서 가격 찾기
+                    price_patterns = [
+                        r'"price"[:\s]*(\d+)',
+                        r'"salePrice"[:\s]*(\d+)',
+                        r'"originalPrice"[:\s]*(\d+)',
+                        r'"sellPrice"[:\s]*(\d+)'
+                    ]
+                    
+                    for pattern in price_patterns:
+                        matches = re.findall(pattern, script_text)
+                        if matches:
+                            try:
+                                candidate_price = int(matches[0])
+                                if 1000 <= candidate_price <= 50000000:
+                                    price = candidate_price
+                                    print(f"✅ 스크립트에서 가격 추출: {price:,}원")
+                                    break
+                            except:
+                                continue
+                    
+                    if price > 0:
+                        break
+        
+        # 이미지 URL 추출 (개선된 패턴)
         image_url = None
         img_selectors = [
             '.cdtl_img_wrap img',
             '.prod_img img',
-            '.item_img img'
+            '.item_img img',
+            '.product_img img',
+            'img[src*="item"]',
+            'img[data-src*="item"]'
         ]
         
         for selector in img_selectors:
             img_element = soup.select_one(selector)
             if img_element:
-                image_url = img_element.get('src') or img_element.get('data-src')
-                if image_url and image_url.startswith('//'):
-                    image_url = f"https:{image_url}"
-                break
+                image_url = img_element.get('src') or img_element.get('data-src') or img_element.get('data-original')
+                if image_url:
+                    if image_url.startswith('//'):
+                        image_url = f"https:{image_url}"
+                    elif image_url.startswith('/'):
+                        image_url = f"https://www.ssg.com{image_url}"
+                    
+                    # 유효한 이미지 URL인지 확인
+                    if any(ext in image_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']):
+                        break
+                    else:
+                        image_url = None
         
         return {
             'name': name,

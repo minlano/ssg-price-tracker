@@ -91,6 +91,7 @@
   padding: 15px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
 }
 
 .product-card:hover {
@@ -130,8 +131,14 @@
   margin: 5px 0;
 }
 
+.product-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .add-btn {
-  width: 100%;
+  flex: 1;
   padding: 8px;
   background-color: #4CAF50;
   color: white;
@@ -139,12 +146,27 @@
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  margin-top: 10px;
   transition: background-color 0.3s;
 }
 
 .add-btn:hover {
   background-color: #45a049;
+}
+
+.view-detail-btn {
+  flex: 1;
+  padding: 8px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.3s;
+}
+
+.view-detail-btn:hover {
+  background-color: #1976D2;
 }
 
 /* ========== 네이버 쇼핑 스타일 시작 ========== */

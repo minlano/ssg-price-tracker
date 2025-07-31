@@ -113,9 +113,8 @@ class AsyncSSGCrawler:
             if cached_results:
                 return cached_results[:limit]
         
-        # 2. 데이터베이스 기능 제거 (DB 테이블 없음)
         
-        # 3. 실제 크롤링 수행
+        # 2. 실제 크롤링 수행
         print(f"🕷️ 실제 크롤링 시작: {keyword}")
         
         try:
@@ -167,9 +166,8 @@ class AsyncSSGCrawler:
             elapsed_time = time.time() - start_time
             print(f"⚡ 비동기 크롤링 완료: {elapsed_time:.2f}초, {len(products)}개 상품")
             
-            # 4. 데이터베이스 저장 기능 제거 (DB 테이블 없음)
                 
-            # 5. 캐시에 저장 (캐시가 사용 가능한 경우)
+            # 3. 캐시에 저장 (캐시가 사용 가능한 경우)
             if products and CACHE_AVAILABLE:
                 cache_manager.cache_results(keyword, products, limit)
             
@@ -238,59 +236,109 @@ class AsyncSSGCrawler:
             return None
     
     def extract_product_name_fast(self, link, keyword: str) -> str:
-        """빠른 상품명 추출 (기존 로직 재사용)"""
+        """빠른 상품명 추출 (개선된 버전)"""
         try:
-            # 모든 텍스트 수집
-            all_texts = []
-            
+            # 1. 링크 자체에서 상품명 추출 시도
             link_text = link.get_text(strip=True)
-            if link_text:
-                all_texts.append(link_text)
+            if link_text and len(link_text) > 10 and not self.is_generic_text(link_text):
+                cleaned = self.clean_product_name(link_text)
+                if len(cleaned) > 10:
+                    return cleaned
             
+            # 2. 부모 요소에서 상품명 관련 클래스 찾기
             current = link.parent
-            for level in range(8):
+            for level in range(5):  # 레벨 축소
                 if current:
-                    text_nodes = current.find_all(text=True)
-                    for text_node in text_nodes:
-                        text = text_node.strip()
-                        if text and len(text) > 5:
-                            all_texts.append(text)
-                    
-                    for tag in ['span', 'div', 'p', 'h1', 'h2', 'h3', 'strong', 'em']:
-                        elements = current.find_all(tag)
-                        for elem in elements[:10]:
-                            elem_text = elem.get_text(strip=True)
-                            if elem_text and len(elem_text) > 5:
-                                all_texts.append(elem_text)
+                    # 상품명 관련 클래스들
+                    name_elements = current.select('.cunit_tit, .item_tit, .prod_tit, .tit, .title')
+                    for elem in name_elements:
+                        text = elem.get_text(strip=True)
+                        if text and len(text) > 10 and not self.is_generic_text(text):
+                            cleaned = self.clean_product_name(text)
+                            if len(cleaned) > 10:
+                                return cleaned
                     
                     current = current.parent
                 else:
                     break
             
-            # 최적 상품명 선택
-            best_candidates = []
-            
-            for text in all_texts:
-                if not text or len(text) < 10:
-                    continue
+            # 3. 개별 상품 페이지에서 정확한 상품명 가져오기 (캐시된 경우만)
+            href = link.get('href', '')
+            if href and 'itemId=' in href:
+                if href.startswith('/'):
+                    product_url = f"https://www.ssg.com{href}"
+                else:
+                    product_url = href
                 
-                cleaned_text = self.clean_text_line(text)
-                if not cleaned_text or len(cleaned_text) < 10:
-                    continue
-                
-                score = self.calculate_product_name_score(cleaned_text, keyword)
-                if score > 0:
-                    best_candidates.append((cleaned_text, score))
+                # 간단한 페이지 요청으로 정확한 상품명 가져오기
+                try:
+                    import requests
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                    response = requests.get(product_url, headers=headers, timeout=3)
+                    if response.status_code == 200:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(response.content, 'html.parser')
+                        
+                        # SSG 상품 페이지의 정확한 상품명 선택자
+                        title_selectors = [
+                            'h2.cdtl_prd_nm',
+                            'h1.cdtl_prd_nm',
+                            '.prod_tit',
+                            'title'
+                        ]
+                        
+                        for selector in title_selectors:
+                            title_elem = soup.select_one(selector)
+                            if title_elem:
+                                title_text = title_elem.get_text(strip=True)
+                                if title_text and title_text != "SSG.COM" and len(title_text) > 10:
+                                    return self.clean_product_name(title_text)
+                except:
+                    pass  # 실패해도 계속 진행
             
-            if best_candidates:
-                best_candidates.sort(key=lambda x: x[1], reverse=True)
-                best_name = best_candidates[0][0]
-                return self.clean_product_name(best_name[:120])
-            
+            # 4. 기본값 반환
             return f"{keyword} 관련 상품"
             
         except Exception:
             return f"{keyword} 관련 상품"
+    
+    def is_generic_text(self, text):
+        """일반적인 텍스트인지 확인"""
+        if not text:
+            return True
+        
+        text_lower = text.lower()
+        
+        # 의미없는 텍스트 패턴들
+        generic_patterns = [
+            '함께 보면 좋은',
+            '관련 상품',
+            '추천 상품',
+            '인기 상품',
+            '베스트',
+            '할인',
+            '무료배송',
+            '당일배송',
+            '리뷰',
+            '별점',
+            '평점',
+            '더보기',
+            '자세히',
+            '상품정보',
+            '상품상세'
+        ]
+        
+        for pattern in generic_patterns:
+            if pattern in text_lower:
+                return True
+        
+        # 너무 짧거나 숫자만 있는 경우
+        if len(text) < 5 or text.isdigit():
+            return True
+        
+        return False
     
     def clean_text_line(self, text: str) -> str:
         """텍스트 라인 정제"""
@@ -340,18 +388,37 @@ class AsyncSSGCrawler:
         return max(0, score)
     
     def extract_price_fast(self, text: str) -> int:
-        """빠른 가격 추출"""
+        """빠른 가격 추출 (개선된 버전)"""
         if not text:
             return 0
         
-        price_match = re.search(r'(\d{1,3}(?:,\d{3})*)\s*원', text)
-        if price_match:
-            try:
-                price = int(price_match.group(1).replace(',', ''))
-                if 100 <= price <= 10000000:
-                    return price
-            except:
-                pass
+        # 다양한 가격 패턴 시도
+        price_patterns = [
+            r'판매가격\s*(\d{1,3}(?:,\d{3})*)',
+            r'정상가격\s*(\d{1,3}(?:,\d{3})*)',
+            r'할인가\s*(\d{1,3}(?:,\d{3})*)',
+            r'(\d{1,3}(?:,\d{3})*)\s*원',
+            r'가격\s*(\d{1,3}(?:,\d{3})*)',
+            r'(\d{1,3}(?:,\d{3})*)'
+        ]
+        
+        for pattern in price_patterns:
+            matches = re.findall(pattern, text)
+            if matches:
+                # 가장 합리적인 가격 선택
+                prices = []
+                for match in matches:
+                    try:
+                        price = int(match.replace(',', ''))
+                        if 1000 <= price <= 50000000:  # 합리적인 가격 범위
+                            prices.append(price)
+                    except:
+                        continue
+                
+                if prices:
+                    # 여러 가격이 있으면 중간값 선택 (할인가와 정가가 섞여있을 수 있음)
+                    prices.sort()
+                    return prices[0] if len(prices) == 1 else prices[len(prices)//2]
         
         return 0
     
