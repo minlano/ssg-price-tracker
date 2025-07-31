@@ -1,9 +1,11 @@
+# 설치가 필요한 사항
 python-dotenv
-requests
-beautifulsoup4
+
 
 #app.py에 변경한 사항
 import os  # 통합 API를 위해 추가
+
+#그 외 작업한 내용 요약
 
 "네이버 쇼핑 크롤러 및 통합 상품 관리 기능 추가
 
