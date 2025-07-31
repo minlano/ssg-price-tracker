@@ -35,45 +35,30 @@ class PriceTracker:
     """가격 추적 메인 클래스"""
     
     def __init__(self):
-        # === 추적 전용 데이터베이스로 변경 시작 ===
-        # self.db_path = 'database/ssg_tracker.db'  # 기존 SSG 전용 DB 주석 처리
-        self.db_path = 'database/price_tracker.db'  # 추적 전용 DB로 변경
-        # === 추적 전용 데이터베이스로 변경 끝 ===
+        # === 기존 데이터베이스와 통합 시작 ===
+        # self.db_path = 'database/price_tracker.db'  # 기존 추적 전용 DB 주석 처리
+        self.db_path = '../database/ssg_tracker.db'  # 기존 데이터베이스와 통합
+        # === 기존 데이터베이스와 통합 끝 ===
         self.smtp_server = 'smtp.gmail.com'
         self.smtp_port = 587
-        self.email_user = os.getenv('EMAIL_USER')
-        self.email_password = os.getenv('EMAIL_PASSWORD')
+        self.email_user = os.getenv('GMAIL_EMAIL')  # 환경변수명 수정
+        self.email_password = os.getenv('GMAIL_APP_PASSWORD')  # 환경변수명 수정
         
     def init_database(self):
-        """데이터베이스 초기화"""
+        """데이터베이스 초기화 - 기존 데이터베이스와 통합"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 추적 목록 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS watch_list (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product_name TEXT NOT NULL,
-                product_url TEXT NOT NULL,
-                image_url TEXT,
-                source TEXT NOT NULL,
-                current_price REAL NOT NULL,
-                target_price REAL,
-                user_email TEXT NOT NULL,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # 기존 테이블들이 이미 존재하므로 추가 테이블만 생성
         
-        # 가격 히스토리 테이블
+        # 가격 히스토리 테이블 (기존 price_logs와 별도로 추적용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS price_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                watch_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
                 price REAL NOT NULL,
                 recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (watch_id) REFERENCES watch_list (id)
+                FOREIGN KEY (product_id) REFERENCES products (id)
             )
         ''')
         
@@ -81,14 +66,14 @@ class PriceTracker:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS price_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                watch_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
                 old_price REAL NOT NULL,
                 new_price REAL NOT NULL,
                 alert_type TEXT NOT NULL,
                 email_sent INTEGER DEFAULT 0,
                 sent_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (watch_id) REFERENCES watch_list (id)
+                FOREIGN KEY (product_id) REFERENCES products (id)
             )
         ''')
         
@@ -96,54 +81,87 @@ class PriceTracker:
         conn.close()
         logger.info("✅ 가격 추적 데이터베이스 초기화 완료")
     
-    # === 통합 추적 목록 추가 기능으로 변경 시작 ===
+    # === 기존 데이터베이스와 통합된 추적 목록 추가 기능으로 변경 시작 ===
     def add_to_watchlist(self, product_name, product_url, image_url, source, current_price, user_email, target_price=None):
-        """통합 추적 목록에 상품 추가 (모든 쇼핑몰 지원)"""
+        """기존 데이터베이스에 상품 추가 및 추적 설정"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # 상품 정보를 통합 형식으로 정규화
-            normalized_data = self._normalize_product_data(
-                product_name, product_url, image_url, source, current_price
-            )
+            # 기존 상품 확인 (URL 기준)
+            cursor.execute('SELECT id FROM products WHERE url = ?', (product_url,))
+            existing_product = cursor.fetchone()
+            
+            if existing_product:
+                product_id = existing_product[0]
+                # 기존 상품의 현재 가격 업데이트
+                cursor.execute('''
+                    UPDATE products SET current_price = ?, updated_at = datetime('now', '+09:00')
+                    WHERE id = ?
+                ''', (current_price, product_id))
+                logger.info(f"✅ 기존 상품 업데이트: {product_name} (ID: {product_id})")
+            else:
+                # 새 상품 추가
+                cursor.execute('''
+                    INSERT INTO products (name, current_price, url, image_url, brand, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+09:00'))
+                ''', (product_name, current_price, product_url, image_url, '', source))
+                product_id = cursor.lastrowid
+                logger.info(f"✅ 새 상품 추가: {product_name} (ID: {product_id})")
+            
+            # 가격 로그 추가 (기존 price_logs 테이블)
+            cursor.execute('''
+                INSERT INTO price_logs (product_id, price, logged_at)
+                VALUES (?, ?, datetime('now', '+09:00'))
+            ''', (product_id, current_price))
+            
+            # 가격 히스토리 추가 (추적용 price_history 테이블)
+            cursor.execute('''
+                INSERT INTO price_history (product_id, price, recorded_at)
+                VALUES (?, ?, datetime('now', '+09:00'))
+            ''', (product_id, current_price))
+            
+            # 알림 설정 추가
+            if target_price is None:
+                target_price = int(current_price * 0.9)  # 기본 목표가: 현재 가격의 90%
             
             cursor.execute('''
-                INSERT INTO watch_list (product_name, product_url, image_url, source, current_price, user_email, target_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (normalized_data['name'], normalized_data['url'], normalized_data['image_url'], 
-                  normalized_data['source'], normalized_data['price'], user_email, target_price))
-            
-            watch_id = cursor.lastrowid
-            
-            # 초기 가격 히스토리 저장
-            cursor.execute('''
-                INSERT INTO price_history (watch_id, price)
-                VALUES (?, ?)
-            ''', (watch_id, normalized_data['price']))
+                INSERT OR REPLACE INTO alerts (product_id, user_email, target_price, is_active)
+                VALUES (?, ?, ?, 1)
+            ''', (product_id, user_email, target_price))
             
             conn.commit()
-            logger.info(f"✅ 통합 추적 목록에 상품 추가: {normalized_data['name']} ({normalized_data['source']})")
-            return watch_id
+            logger.info(f"✅ 추적 목록에 상품 추가: {product_name} (ID: {product_id})")
+            return product_id
             
         except Exception as e:
-            logger.error(f"❌ 통합 추적 목록 추가 실패: {e}")
+            logger.error(f"❌ 추적 목록 추가 실패: {e}")
             return None
         finally:
             conn.close()
-    # === 통합 추적 목록 추가 기능으로 변경 끝 ===
+    # === 기존 데이터베이스와 통합된 추적 목록 추가 기능으로 변경 끝 ===
     
     def get_watchlist(self, user_email):
-        """사용자의 추적 목록 조회"""
+        """사용자의 추적 목록 조회 - 기존 데이터베이스 사용"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, product_name, product_url, image_url, source, current_price, target_price, created_at
-            FROM watch_list 
-            WHERE user_email = ? AND is_active = 1
-            ORDER BY created_at DESC
-            LIMIT 30
+            SELECT 
+                p.id,
+                p.name as product_name,
+                p.current_price,
+                p.url as product_url,
+                p.image_url,
+                p.brand,
+                p.source,
+                p.created_at,
+                a.target_price,
+                a.is_active
+            FROM products p
+            JOIN alerts a ON p.id = a.product_id
+            WHERE a.user_email = ? AND a.is_active = 1
+            ORDER BY p.created_at DESC
         ''', (user_email,))
         
         results = cursor.fetchall()
@@ -154,79 +172,105 @@ class PriceTracker:
             watchlist.append({
                 'id': row[0],
                 'product_name': row[1],
-                'product_url': row[2],
-                'image_url': row[3],
-                'source': row[4],
-                'current_price': row[5],
-                'target_price': row[6],
-                'created_at': row[7]
+                'current_price': row[2],
+                'product_url': row[3],
+                'image_url': row[4],
+                'brand': row[5],
+                'source': row[6],
+                'created_at': row[7],
+                'target_price': row[8],
+                'is_active': row[9]
             })
         
         return watchlist
 
     # === 임시 추적 목록 관리 메서드 시작 ===
-    # === 통합 임시 추적 목록 추가 기능으로 변경 시작 ===
+    # === 기존 데이터베이스와 통합된 임시 추적 목록 추가 기능으로 변경 시작 ===
     def add_to_temp_watchlist(self, product_name, product_url, image_url, source, current_price, target_price=None):
-        """통합 임시 추적 목록에 상품 추가 (모든 쇼핑몰 지원)"""
+        """임시 추적 목록에 상품 추가 - 기존 데이터베이스 사용"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # 상품 정보를 통합 형식으로 정규화
-            normalized_data = self._normalize_product_data(
-                product_name, product_url, image_url, source, current_price
-            )
+            # 기존 상품 확인 (URL 기준)
+            cursor.execute('SELECT id FROM products WHERE url = ?', (product_url,))
+            existing_product = cursor.fetchone()
+            
+            if existing_product:
+                product_id = existing_product[0]
+                # 기존 상품의 현재 가격 업데이트
+                cursor.execute('''
+                    UPDATE products SET current_price = ?, updated_at = datetime('now', '+09:00')
+                    WHERE id = ?
+                ''', (current_price, product_id))
+            else:
+                # 새 상품 추가
+                cursor.execute('''
+                    INSERT INTO products (name, current_price, url, image_url, brand, source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+09:00'))
+                ''', (product_name, current_price, product_url, image_url, '', source))
+                product_id = cursor.lastrowid
+            
+            # 임시 알림 설정 (is_active = 0으로 설정)
+            if target_price is None:
+                target_price = int(current_price * 0.9)
             
             cursor.execute('''
-                INSERT INTO watch_list (product_name, product_url, image_url, source, current_price, user_email, target_price, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (normalized_data['name'], normalized_data['url'], normalized_data['image_url'], 
-                  normalized_data['source'], normalized_data['price'], 'temp@temp.com', target_price, 0))
+                INSERT OR REPLACE INTO alerts (product_id, user_email, target_price, is_active)
+                VALUES (?, ?, ?, 0)
+            ''', (product_id, 'temp@temp.com', target_price))
             
-            watch_id = cursor.lastrowid
-            
-            # 초기 가격 히스토리는 활성화될 때 저장
             conn.commit()
-            logger.info(f"✅ 통합 임시 추적 목록에 상품 추가: {normalized_data['name']} ({normalized_data['source']})")
-            return watch_id
+            logger.info(f"✅ 임시 추적 목록에 상품 추가: {product_name} (ID: {product_id})")
+            return product_id
             
         except Exception as e:
-            logger.error(f"❌ 통합 임시 추적 목록 추가 실패: {e}")
+            logger.error(f"❌ 임시 추적 목록 추가 실패: {e}")
             return None
         finally:
             conn.close()
-    # === 통합 임시 추적 목록 추가 기능으로 변경 끝 ===
+    # === 기존 데이터베이스와 통합된 임시 추적 목록 추가 기능으로 변경 끝 ===
 
     def get_temp_watchlist(self):
-        """임시 추적 목록 조회"""
+        """임시 추적 목록 조회 - 기존 데이터베이스 사용"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT id, product_name, product_url, image_url, source, current_price, target_price, created_at
-            FROM watch_list 
-            WHERE user_email = 'temp@temp.com' AND is_active = 0
-            ORDER BY created_at DESC
-            LIMIT 30
-        ''')
+            SELECT 
+                p.id,
+                p.name as product_name,
+                p.current_price,
+                p.url as product_url,
+                p.image_url,
+                p.brand,
+                p.source,
+                p.created_at,
+                a.target_price
+            FROM products p
+            JOIN alerts a ON p.id = a.product_id
+            WHERE a.user_email = 'temp@temp.com' AND a.is_active = 0
+            ORDER BY p.created_at DESC
+        ''', ())
         
         results = cursor.fetchall()
         conn.close()
         
-        temp_watchlist = []
+        watchlist = []
         for row in results:
-            temp_watchlist.append({
+            watchlist.append({
                 'id': row[0],
                 'product_name': row[1],
-                'product_url': row[2],
-                'image_url': row[3],
-                'source': row[4],
-                'current_price': row[5],
-                'target_price': row[6],
-                'created_at': row[7]
+                'current_price': row[2],
+                'product_url': row[3],
+                'image_url': row[4],
+                'brand': row[5],
+                'source': row[6],
+                'created_at': row[7],
+                'target_price': row[8]
             })
         
-        return temp_watchlist
+        return watchlist
 
     def activate_temp_watchlist(self, user_email):
         """임시 추적 목록을 실제 추적 목록으로 활성화"""
@@ -234,88 +278,73 @@ class PriceTracker:
         cursor = conn.cursor()
         
         try:
-            # 임시 추적 목록 조회
+            # 임시 알림을 실제 사용자 이메일로 변경하고 활성화
             cursor.execute('''
-                SELECT id, current_price FROM watch_list 
-                WHERE user_email = 'temp@temp.com' AND is_active = 0
-            ''')
-            
-            temp_items = cursor.fetchall()
-            
-            if not temp_items:
-                return 0
-            
-            # 임시 목록을 실제 목록으로 활성화
-            cursor.execute('''
-                UPDATE watch_list 
-                SET user_email = ?, is_active = 1, updated_at = CURRENT_TIMESTAMP
+                UPDATE alerts 
+                SET user_email = ?, is_active = 1
                 WHERE user_email = 'temp@temp.com' AND is_active = 0
             ''', (user_email,))
             
-            # 각 상품의 초기 가격 히스토리 저장
-            for watch_id, current_price in temp_items:
-                cursor.execute('''
-                    INSERT INTO price_history (watch_id, price)
-                    VALUES (?, ?)
-                ''', (watch_id, current_price))
-            
-            activated_count = len(temp_items)
+            activated_count = cursor.rowcount
             conn.commit()
             
-            logger.info(f"✅ {activated_count}개 상품이 활성화됨: {user_email}")
+            logger.info(f"✅ {activated_count}개 상품이 추적 목록으로 활성화됨")
             return activated_count
             
         except Exception as e:
-            logger.error(f"❌ 추적 목록 활성화 실패: {e}")
+            logger.error(f"❌ 임시 목록 활성화 실패: {e}")
             return 0
         finally:
             conn.close()
 
-    # === 임시 추적 목록 삭제 메서드 추가 시작 ===
     def remove_from_temp_watchlist(self, watch_id):
         """임시 추적 목록에서 상품 제거"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # 임시 목록에서 해당 상품 삭제
+            # 해당 상품의 임시 알림 제거
             cursor.execute('''
-                DELETE FROM watch_list 
-                WHERE id = ? AND user_email = 'temp@temp.com' AND is_active = 0
+                DELETE FROM alerts 
+                WHERE product_id = ? AND user_email = 'temp@temp.com' AND is_active = 0
             ''', (watch_id,))
             
-            deleted_count = cursor.rowcount
             conn.commit()
+            logger.info(f"✅ 임시 추적 목록에서 상품 제거: ID {watch_id}")
+            return True
             
-            if deleted_count > 0:
-                logger.info(f"✅ 임시 추적 목록에서 제거: ID {watch_id}")
-                return True
-            else:
-                logger.warning(f"⚠️ 임시 추적 목록에서 제거할 상품을 찾을 수 없음: ID {watch_id}")
-                return False
-                
         except Exception as e:
             logger.error(f"❌ 임시 추적 목록 제거 실패: {e}")
             return False
         finally:
             conn.close()
-    # === 임시 추적 목록 삭제 메서드 추가 끝 ===
-    
     # === 임시 추적 목록 관리 메서드 끝 ===
-    
+
     def get_price_history(self, watch_id, days=7):
-        """가격 히스토리 조회 (최근 7일)"""
+        """가격 히스토리 조회 - 기존 데이터베이스 사용"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # price_history 테이블에서 조회 (추적용)
         cursor.execute('''
             SELECT price, recorded_at
             FROM price_history 
-            WHERE watch_id = ? AND recorded_at >= datetime('now', '-{} days')
+            WHERE product_id = ? AND recorded_at >= datetime('now', '-{} days')
             ORDER BY recorded_at ASC
         '''.format(days), (watch_id,))
         
         results = cursor.fetchall()
+        
+        # price_history에 데이터가 없으면 price_logs에서 조회
+        if not results:
+            cursor.execute('''
+                SELECT price, logged_at as recorded_at
+                FROM price_logs 
+                WHERE product_id = ? AND logged_at >= datetime('now', '-{} days')
+                ORDER BY logged_at ASC
+            '''.format(days), (watch_id,))
+            results = cursor.fetchall()
+        
         conn.close()
         
         history = []
@@ -434,23 +463,25 @@ class PriceTracker:
             logger.error(f"❌ 이메일 발송 실패: {e}")
             return False
     
-    # === 통합 가격 체크 기능으로 변경 시작 ===
+    # === 기존 데이터베이스와 통합된 가격 체크 기능으로 변경 시작 ===
     def check_all_prices(self):
-        """모든 추적 상품의 가격 체크 (모든 쇼핑몰 지원)"""
+        """모든 추적 상품의 가격 체크 - 기존 데이터베이스 사용"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 활성 추적 목록 조회
+        # 활성 추적 목록 조회 (기존 데이터베이스 구조 사용)
         cursor.execute('''
-            SELECT id, product_name, product_url, source, current_price, user_email
-            FROM watch_list 
-            WHERE is_active = 1
+            SELECT 
+                p.id, p.name, p.url, p.source, p.current_price, a.user_email
+            FROM products p
+            JOIN alerts a ON p.id = a.product_id
+            WHERE a.is_active = 1
         ''')
         
         watchlist = cursor.fetchall()
         
         for item in watchlist:
-            watch_id, product_name, product_url, source, current_price, user_email = item
+            product_id, product_name, product_url, source, current_price, user_email = item
             
             # 소스별 가격 체크
             new_price = None
@@ -462,16 +493,22 @@ class PriceTracker:
                 new_price = self.check_11st_price(product_url)
             
             if new_price and new_price != current_price:
-                # 가격 히스토리 저장
+                # 가격 히스토리 저장 (추적용)
                 cursor.execute('''
-                    INSERT INTO price_history (watch_id, price)
-                    VALUES (?, ?)
-                ''', (watch_id, new_price))
+                    INSERT INTO price_history (product_id, price, recorded_at)
+                    VALUES (?, ?, datetime('now', '+09:00'))
+                ''', (product_id, new_price))
+                
+                # 가격 로그 저장 (기존 price_logs 테이블)
+                cursor.execute('''
+                    INSERT INTO price_logs (product_id, price, logged_at)
+                    VALUES (?, ?, datetime('now', '+09:00'))
+                ''', (product_id, new_price))
                 
                 # 최저가 갱신 체크
                 cursor.execute('''
-                    SELECT MIN(price) FROM price_history WHERE watch_id = ?
-                ''', (watch_id,))
+                    SELECT MIN(price) FROM price_history WHERE product_id = ?
+                ''', (product_id,))
                 
                 min_price = cursor.fetchone()[0]
                 
@@ -481,15 +518,15 @@ class PriceTracker:
                     
                     # 알림 로그 저장
                     cursor.execute('''
-                        INSERT INTO price_alerts (watch_id, old_price, new_price, alert_type, email_sent, sent_at)
+                        INSERT INTO price_alerts (product_id, old_price, new_price, alert_type, email_sent, sent_at)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (watch_id, current_price, new_price, 'lowest_price', 1 if alert_sent else 0, datetime.now() if alert_sent else None))
+                    ''', (product_id, current_price, new_price, 'lowest_price', 1 if alert_sent else 0, datetime.now() if alert_sent else None))
                 
                 # 현재 가격 업데이트
                 cursor.execute('''
-                    UPDATE watch_list SET current_price = ?, updated_at = CURRENT_TIMESTAMP
+                    UPDATE products SET current_price = ?, updated_at = datetime('now', '+09:00')
                     WHERE id = ?
-                ''', (new_price, watch_id))
+                ''', (new_price, product_id))
                 
                 logger.info(f"📊 가격 업데이트: {product_name} ({source}) {current_price}원 → {new_price}원")
             
@@ -498,85 +535,74 @@ class PriceTracker:
         
         conn.commit()
         conn.close()
-        logger.info("✅ 전체 가격 체크 완료 (모든 쇼핑몰)")
-    # === 통합 가격 체크 기능으로 변경 끝 ===
+        logger.info("✅ 전체 가격 체크 완료 (기존 데이터베이스 통합)")
+    # === 기존 데이터베이스와 통합된 가격 체크 기능으로 변경 끝 ===
     
     def remove_from_watchlist(self, watch_id, user_email):
-        """추적 목록에서 상품 제거"""
+        """추적 목록에서 상품 제거 - 기존 데이터베이스 사용"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('''
-            UPDATE watch_list SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND user_email = ?
-        ''', (watch_id, user_email))
-        
-        conn.commit()
-        conn.close()
-        logger.info(f"✅ 추적 목록에서 제거: ID {watch_id}")
+        try:
+            # 해당 상품의 알림 설정 비활성화
+            cursor.execute('''
+                UPDATE alerts 
+                SET is_active = 0
+                WHERE product_id = ? AND user_email = ?
+            ''', (watch_id, user_email))
+            
+            conn.commit()
+            logger.info(f"✅ 추적 목록에서 상품 제거: ID {watch_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 추적 목록 제거 실패: {e}")
+            return False
+        finally:
+            conn.close()
 
     # === 통합 쇼핑몰 지원 메서드 추가 시작 ===
     def _normalize_product_data(self, product_name, product_url, image_url, source, current_price):
-        """쇼핑몰별 상품 데이터를 통합 형식으로 정규화"""
-        try:
-            # 상품명 정리 (HTML 태그 제거, 길이 제한)
-            clean_name = product_name[:200] if product_name else "상품명 없음"
-            
-            # URL 정리
-            clean_url = product_url if product_url and product_url != '#' else ''
-            
-            # 이미지 URL 정리
-            clean_image_url = image_url if image_url else ''
-            
-            # 소스명 통일
-            source_mapping = {
-                'SSG': 'SSG',
-                'NAVER': 'NaverShopping',
-                'NaverShopping': 'NaverShopping',
-                '11번가': '11ST',
-                '11ST': '11ST'
-            }
-            clean_source = source_mapping.get(source, source)
-            
-            # 가격 정리 (정수형으로 변환)
-            clean_price = int(current_price) if current_price and current_price > 0 else 0
-            
-            return {
-                'name': clean_name,
-                'url': clean_url,
-                'image_url': clean_image_url,
-                'source': clean_source,
-                'price': clean_price
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 상품 데이터 정규화 실패: {e}")
-            return {
-                'name': str(product_name)[:200] if product_name else "상품명 없음",
-                'url': str(product_url) if product_url else '',
-                'image_url': str(image_url) if image_url else '',
-                'source': str(source),
-                'price': int(current_price) if current_price and current_price > 0 else 0
-            }
+        """상품 데이터 정규화"""
+        return {
+            'name': product_name.strip(),
+            'url': product_url.strip(),
+            'image_url': image_url.strip() if image_url else '',
+            'source': source.upper().strip(),
+            'price': float(current_price) if current_price else 0
+        }
 
     def check_11st_price(self, product_url):
         """11번가 상품 가격 체크"""
         try:
-            # 11번가는 현재 API 기반이므로 실제 가격 체크 제한적
-            # 샘플 구현 (실제로는 11번가 API 호출 필요)
-            logger.info(f"11번가 가격 체크 시도: {product_url}")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
             
-            # 실제 구현시에는 11번가 API를 통해 가격 조회
-            # 현재는 제한적 지원으로 None 반환
-            return None
+            response = requests.get(product_url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                return None
+                
+            soup = BeautifulSoup(response.content, 'html.parser')
             
+            # 11번가 가격 선택자 (실제 선택자로 수정 필요)
+            price_element = soup.select_one('.price')
+            if price_element:
+                price_text = price_element.get_text().strip()
+                price = float(price_text.replace(',', '').replace('원', ''))
+                return price
+                
         except Exception as e:
             logger.error(f"❌ 11번가 가격 체크 실패: {e}")
-            return None
+        
+        return None
     # === 통합 쇼핑몰 지원 메서드 추가 끝 ===
 
-# 전역 인스턴스
+# 가격 추적기 인스턴스 생성
 price_tracker = PriceTracker()
+
+# 데이터베이스 초기화
+price_tracker.init_database()
 
 if __name__ == "__main__":
     # 데이터베이스 초기화

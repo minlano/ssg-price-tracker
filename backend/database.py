@@ -73,6 +73,11 @@ def init_db():
     except:
         pass
     
+    try:
+        conn.execute('ALTER TABLE products ADD COLUMN updated_at TIMESTAMP')
+    except:
+        pass
+    
     conn.commit()
     conn.close()
     print("데이터베이스가 초기화되었습니다.")

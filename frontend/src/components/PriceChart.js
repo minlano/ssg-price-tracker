@@ -19,6 +19,7 @@ function PriceChart({ watchId }) {
   const fetchPriceHistory = async () => {
     setIsLoading(true);
     try {
+      // watchId가 실제로는 product_id임
       const response = await fetch(`/api/price-history/${watchId}?days=${days}`);
       const data = await response.json();
       
@@ -99,6 +100,7 @@ function PriceChart({ watchId }) {
       <div className="chart-empty">
         <p>📈 가격 데이터가 없습니다.</p>
         <p>상품이 추적된 후 시간이 지나면 가격 변동 차트를 볼 수 있습니다.</p>
+        <p>💡 가격 데이터는 3시간마다 자동으로 수집됩니다.</p>
       </div>
     );
   }
