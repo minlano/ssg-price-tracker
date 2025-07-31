@@ -3,6 +3,15 @@ Flask-CORS==4.0.0
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
+
 aiohttp==3.9.1
 redis==5.0.1
 sqlalchemy==2.0.23
+=======
+# 고도화된 API를 위한 추가 패키지
+pandas==2.0.3
+numpy==1.24.3
+python-dateutil==2.8.2
+schedule==1.2.0
+python-dotenv==1.0.0
+
