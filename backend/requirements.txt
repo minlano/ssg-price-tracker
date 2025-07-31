@@ -7,7 +7,6 @@ lxml==4.9.3
 aiohttp==3.9.1
 redis==5.0.1
 sqlalchemy==2.0.23
-=======
 # 고도화된 API를 위한 추가 패키지
 pandas==2.0.3
 numpy==1.24.3
