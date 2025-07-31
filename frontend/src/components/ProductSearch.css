@@ -146,3 +146,38 @@
 .add-btn:hover {
   background-color: #45a049;
 }
+
+/* ========== 네이버 쇼핑 스타일 시작 ========== */
+.source-selector {
+  display: flex;
+  gap: 5px;
+  margin-right: 10px;
+}
+
+.source-btn {
+  padding: 10px 15px !important;
+  background-color: #444 !important;
+  color: #ccc !important;
+  border: 1px solid #666 !important;
+  border-radius: 5px !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  transition: all 0.3s !important;
+}
+
+.source-btn:hover {
+  background-color: #555 !important;
+  color: white !important;
+}
+
+.source-btn.active {
+  background-color: #61dafb !important;
+  color: #282c34 !important;
+  border-color: #61dafb !important;
+  font-weight: bold !important;
+}
+
+.source-btn.active:hover {
+  background-color: #4fa8c5 !important;
+}
+/* ========== 네이버 쇼핑 스타일 끝 ========== */

@@ -12,9 +12,10 @@ function ProductList({ refreshTrigger }) {
     fetchProducts();
   }, [refreshTrigger]);
 
+  // ========== 통합 상품 목록 조회 시작 ==========
   const fetchProducts = async () => {
     try {
-      const response = await fetch('/api/products');
+      const response = await fetch('/api/products/all');
       if (response.ok) {
         const data = await response.json();
         setProducts(data);
@@ -25,6 +26,22 @@ function ProductList({ refreshTrigger }) {
       setIsLoading(false);
     }
   };
+
+  // [되돌리기용] 기존 SSG 전용 API 호출 - 아래 주석 해제하면 원래대로
+  // const fetchProducts = async () => {
+  //   try {
+  //     const response = await fetch('/api/products');
+  //     if (response.ok) {
+  //       const data = await response.json();
+  //       setProducts(data);
+  //     }
+  //   } catch (error) {
+  //     console.error('상품 목록 조회 오류:', error);
+  //   } finally {
+  //     setIsLoading(false);
+  //   }
+  // };
+  // ========== 통합 상품 목록 조회 끝 ==========
 
   const fetchPriceHistory = async (productId) => {
     try {
@@ -77,6 +94,38 @@ function ProductList({ refreshTrigger }) {
     }
   };
 
+  // ========== 상품 삭제 함수 시작 ==========
+  const handleDeleteProduct = async (productId, productName) => {
+    if (!window.confirm(`"${productName}" 상품을 삭제하시겠습니까?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/products/${productId}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert('상품이 삭제되었습니다!');
+        // 선택된 상품이 삭제된 상품이면 선택 해제
+        if (selectedProduct && selectedProduct.id === productId) {
+          setSelectedProduct(null);
+          setPriceHistory([]);
+        }
+        // 상품 목록 새로고침
+        fetchProducts();
+      } else {
+        alert(data.error || '상품 삭제 중 오류가 발생했습니다.');
+      }
+    } catch (error) {
+      console.error('상품 삭제 오류:', error);
+      alert('상품 삭제 중 오류가 발생했습니다.');
+    }
+  };
+  // ========== 상품 삭제 함수 끝 ==========
+
   if (isLoading) {
     return <div className="loading">상품 목록을 불러오는 중...</div>;
   }
@@ -108,15 +157,29 @@ function ProductList({ refreshTrigger }) {
                   <p className="date">
                     등록일: {new Date(product.created_at).toLocaleDateString()}
                   </p>
-                  <a 
-                    href={product.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="view-link"
-                  >
-                    상품 보기
-                  </a>
+                  <div className="product-actions">
+                    <a 
+                      href={product.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="view-link"
+                    >
+                      상품 보기
+                    </a>
+                    {/* ========== 삭제 버튼 시작 ========== */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteProduct(product.id, product.name);
+                      }}
+                      className="delete-btn"
+                      title="상품 삭제"
+                    >
+                      🗑️
+                    </button>
+                    {/* ========== 삭제 버튼 끝 ========== */}
+                  </div>
                 </div>
               </div>
             ))}
