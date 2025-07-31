@@ -7,8 +7,8 @@ def test_real_11st_api():
     """실제 11번가 API 호출 테스트"""
     
     # 제공해주신 URL 사용
-    api_key = "24e0fb9e898e94041c923b76f07a3931"
-    base_url = "https://openapi.11st.co.kr/openapi/OpenApiService.tmall"
+    api_key = "e6a293873ce4dacd7d3431955da64232"
+    base_url = "http://openapi.11st.co.kr/openapi/OpenApiService.tmall"
     
     # 테스트 파라미터
     params = {
