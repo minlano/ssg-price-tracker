@@ -33,7 +33,12 @@ jobs:
       run: |
         cd frontend
         npm install
-               
+        
+    - name: Run Python tests
+      run: |
+        cd backend
+        python -m pytest
+        
     - name: Run Node tests
       run: |
         cd frontend
