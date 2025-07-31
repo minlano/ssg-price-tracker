@@ -5,12 +5,48 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import init_db, get_db_connection
-from advanced_search import advanced_search_bp
-from product_comparison import product_comparison_bp
-from data_processing import data_processing_bp
-from eleventh_street_api import EleventhStreetAPI
-from config import config
+# Database imports - 선택적 import로 변경
+try:
+    from database import init_db, get_db_connection
+    DATABASE_AVAILABLE = True
+except ImportError:
+    DATABASE_AVAILABLE = False
+    print("⚠️ database 모듈을 찾을 수 없습니다.")
+# Blueprint imports - 선택적 import로 변경
+try:
+    from advanced_search import advanced_search_bp
+    ADVANCED_SEARCH_AVAILABLE = True
+except ImportError:
+    ADVANCED_SEARCH_AVAILABLE = False
+    print("⚠️ advanced_search 모듈을 찾을 수 없습니다.")
+
+try:
+    from product_comparison import product_comparison_bp
+    PRODUCT_COMPARISON_AVAILABLE = True
+except ImportError:
+    PRODUCT_COMPARISON_AVAILABLE = False
+    print("⚠️ product_comparison 모듈을 찾을 수 없습니다.")
+
+try:
+    from data_processing import data_processing_bp
+    DATA_PROCESSING_AVAILABLE = True
+except ImportError:
+    DATA_PROCESSING_AVAILABLE = False
+    print("⚠️ data_processing 모듈을 찾을 수 없습니다.")
+# 추가 모듈 imports - 선택적 import로 변경
+try:
+    from eleventh_street_api import EleventhStreetAPI
+    ELEVENTH_API_AVAILABLE = True
+except ImportError:
+    ELEVENTH_API_AVAILABLE = False
+    print("⚠️ eleventh_street_api 모듈을 찾을 수 없습니다.")
+
+try:
+    from config import config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    print("⚠️ config 모듈을 찾을 수 없습니다.")
 import sqlite3
 from datetime import datetime
 
@@ -22,16 +58,33 @@ CORS(app)
 app.config['JSON_AS_ASCII'] = False
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
 
-# Blueprint 등록
-app.register_blueprint(advanced_search_bp)
-app.register_blueprint(product_comparison_bp)
-app.register_blueprint(data_processing_bp)
+# Blueprint 등록 (조건부)
+if ADVANCED_SEARCH_AVAILABLE:
+    app.register_blueprint(advanced_search_bp)
+    print("✅ advanced_search Blueprint 등록됨")
 
-# 11번가 API 인스턴스
-eleventh_api = EleventhStreetAPI()
+if PRODUCT_COMPARISON_AVAILABLE:
+    app.register_blueprint(product_comparison_bp)
+    print("✅ product_comparison Blueprint 등록됨")
 
-# 데이터베이스 초기화
-init_db()
+if DATA_PROCESSING_AVAILABLE:
+    app.register_blueprint(data_processing_bp)
+    print("✅ data_processing Blueprint 등록됨")
+
+# 11번가 API 인스턴스 (조건부)
+if ELEVENTH_API_AVAILABLE:
+    eleventh_api = EleventhStreetAPI()
+    print("✅ 11번가 API 인스턴스 생성됨")
+else:
+    eleventh_api = None
+    print("⚠️ 11번가 API를 사용할 수 없습니다.")
+
+# 데이터베이스 초기화 (조건부)
+if DATABASE_AVAILABLE:
+    init_db()
+    print("✅ 데이터베이스 초기화됨")
+else:
+    print("⚠️ 데이터베이스를 사용할 수 없습니다.")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -70,15 +123,27 @@ def index():
 def health_check():
     """API 상태 확인"""
     try:
-        conn = get_db_connection()
-        conn.execute('SELECT 1').fetchone()
-        conn.close()
+        if DATABASE_AVAILABLE:
+            conn = get_db_connection()
+            conn.execute('SELECT 1').fetchone()
+            conn.close()
+            db_status = 'connected'
+        else:
+            db_status = 'not_available'
         
         return jsonify({
             'status': 'healthy',
             'timestamp': datetime.now().isoformat(),
-            'database': 'connected',
-            'version': '2.0.0'
+            'database': db_status,
+            'version': '2.0.0',
+            'modules': {
+                'database': DATABASE_AVAILABLE,
+                'advanced_search': ADVANCED_SEARCH_AVAILABLE,
+                'product_comparison': PRODUCT_COMPARISON_AVAILABLE,
+                'data_processing': DATA_PROCESSING_AVAILABLE,
+                'eleventh_api': ELEVENTH_API_AVAILABLE,
+                'config': CONFIG_AVAILABLE
+            }
         })
     except Exception as e:
         return jsonify({
@@ -90,6 +155,12 @@ def health_check():
 @app.route('/api/dashboard/advanced', methods=['GET'])
 def get_advanced_dashboard():
     """고도화된 대시보드 데이터"""
+    if not DATABASE_AVAILABLE:
+        return jsonify({
+            'error': '데이터베이스를 사용할 수 없습니다',
+            'message': '대시보드 기능을 사용하려면 데이터베이스 설정이 필요합니다'
+        }), 503
+    
     try:
         conn = get_db_connection()
         
@@ -173,6 +244,12 @@ def get_advanced_dashboard():
 @app.route('/api/products/trending', methods=['GET'])
 def get_trending_products():
     """인기 상품 조회"""
+    if not DATABASE_AVAILABLE:
+        return jsonify({
+            'error': '데이터베이스를 사용할 수 없습니다',
+            'message': '인기 상품 기능을 사용하려면 데이터베이스 설정이 필요합니다'
+        }), 503
+    
     try:
         limit = request.args.get('limit', 20, type=int)
         category = request.args.get('category')
@@ -221,6 +298,12 @@ def get_trending_products():
 @app.route('/api/products/recommendations', methods=['GET'])
 def get_product_recommendations():
     """상품 추천"""
+    if not DATABASE_AVAILABLE:
+        return jsonify({
+            'error': '데이터베이스를 사용할 수 없습니다',
+            'message': '상품 추천 기능을 사용하려면 데이터베이스 설정이 필요합니다'
+        }), 503
+    
     try:
         user_email = request.args.get('user_email')
         limit = request.args.get('limit', 10, type=int)
@@ -245,6 +328,12 @@ def get_product_recommendations():
 @app.route('/api/alerts/smart', methods=['POST'])
 def create_smart_alert():
     """스마트 알림 생성 (가격 예측 기반)"""
+    if not DATABASE_AVAILABLE:
+        return jsonify({
+            'error': '데이터베이스를 사용할 수 없습니다',
+            'message': '스마트 알림 기능을 사용하려면 데이터베이스 설정이 필요합니다'
+        }), 503
+    
     try:
         data = request.json
         product_id = data.get('product_id')
@@ -305,6 +394,12 @@ def create_smart_alert():
 @app.route('/api/11st/categories', methods=['GET'])
 def get_eleventh_street_categories():
     """11번가 카테고리 목록"""
+    if not ELEVENTH_API_AVAILABLE or not eleventh_api:
+        return jsonify({
+            'error': '11번가 API를 사용할 수 없습니다',
+            'message': '11번가 API 기능을 사용하려면 API 설정이 필요합니다'
+        }), 503
+    
     try:
         categories = eleventh_api.get_category_list()
         return jsonify({
