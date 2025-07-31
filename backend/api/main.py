@@ -314,61 +314,35 @@ def get_eleventh_street_categories():
     except Exception as e:
         return jsonify({'error': f'카테고리 조회 중 오류가 발생했습니다: {str(e)}'}), 500
 
-@app.route('/api/11st/search', methods=['GET'])
-def search_eleventh_street():
-    """11번가 상품 검색 - 사용자 키워드 선택"""
+@app.route('/api/search', methods=['GET'])
+def search_products():
+    """상품 검색 - 11번가 API 연동 (SSG 호환)"""
     try:
         keyword = request.args.get('keyword', '').strip()
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 20, type=int)
-        category = request.args.get('category')
-        min_price = request.args.get('min_price', type=int)
-        max_price = request.args.get('max_price', type=int)
-        sort_type = request.args.get('sort', 'popular')
         
         # 키워드 유효성 검사
         if not keyword:
-            return jsonify({
-                'error': '검색어를 입력해주세요',
-                'message': '사용 예시: /api/11st/search?keyword=스마트폰',
-                'popular_keywords': [
-                    '스마트폰', '노트북', '이어폰', '키보드', '마우스',
-                    '운동화', '가방', '시계', '화장품', '의류'
-                ]
-            }), 400
-        
-        # 키워드 길이 제한
-        if len(keyword) > 50:
-            return jsonify({'error': '검색어는 50자 이내로 입력해주세요'}), 400
+            return jsonify({'error': '검색어가 필요합니다'}), 400
         
         # 11번가 API 호출
         results = eleventh_api.search_products(
             keyword=keyword,
             page=page,
-            limit=limit,
-            category=category,
-            min_price=min_price,
-            max_price=max_price,
-            sort_type=sort_type
+            limit=limit
         )
         
-        # 검색 결과에 메타데이터 추가
-        results['search_info'] = {
+        # SSG 호환 형식으로 변환
+        return jsonify({
             'keyword': keyword,
-            'search_time': datetime.now().isoformat(),
-            'api_source': '11번가 실제 API',
-            'filters_applied': {
-                'category': category,
-                'min_price': min_price,
-                'max_price': max_price,
-                'sort': sort_type
-            }
-        }
-        
-        return jsonify(results)
+            'page': page,
+            'products': results.get('products', []),
+            'total': results.get('total', 0)
+        })
         
     except Exception as e:
-        return jsonify({'error': f'11번가 검색 중 오류가 발생했습니다: {str(e)}'}), 500
+        return jsonify({'error': f'검색 중 오류가 발생했습니다: {str(e)}'}), 500
 
 @app.route('/api/11st/popular-keywords', methods=['GET'])
 def get_popular_keywords():
@@ -397,14 +371,233 @@ def get_popular_keywords():
     except Exception as e:
         return jsonify({'error': f'인기 키워드 조회 중 오류가 발생했습니다: {str(e)}'}), 500
 
-@app.route('/api/11st/product/<product_id>', methods=['GET'])
-def get_eleventh_street_product(product_id):
-    """11번가 상품 상세 정보"""
+@app.route('/api/products', methods=['GET'])
+def get_products():
+    """상품 목록 조회 - SSG 호환"""
     try:
-        product = eleventh_api.get_product_detail(product_id)
-        return jsonify(product)
+        conn = get_db_connection()
+        products = conn.execute('SELECT * FROM products ORDER BY created_at DESC').fetchall()
+        conn.close()
+        
+        return jsonify([dict(product) for product in products])
     except Exception as e:
-        return jsonify({'error': f'상품 상세 조회 중 오류가 발생했습니다: {str(e)}'}), 500
+        return jsonify({'error': f'상품 목록 조회 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/products', methods=['POST'])
+def add_product():
+    """상품 추가 - SSG 호환"""
+    try:
+        data = request.json
+        
+        required_fields = ['name', 'url', 'price']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'{field}가 필요합니다'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 중복 URL 체크
+        existing = cursor.execute('SELECT id FROM products WHERE url = ?', (data['url'],)).fetchone()
+        if existing:
+            return jsonify({'error': '이미 등록된 상품입니다'}), 400
+        
+        # 상품 추가
+        cursor.execute(
+            'INSERT INTO products (name, url, current_price, image_url, brand, source) VALUES (?, ?, ?, ?, ?, ?)',
+            (
+                data['name'], 
+                data['url'], 
+                data['price'],
+                data.get('image_url'),
+                data.get('brand', '11번가'),
+                '11번가'
+            )
+        )
+        product_id = cursor.lastrowid
+        
+        # 가격 이력 추가
+        cursor.execute(
+            'INSERT INTO price_logs (product_id, price) VALUES (?, ?)',
+            (product_id, data['price'])
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'id': product_id,
+            'message': '상품이 추가되었습니다'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'상품 추가 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/products/<int:product_id>/prices', methods=['GET'])
+def get_price_history(product_id):
+    """상품 가격 이력 조회 - SSG 호환"""
+    try:
+        conn = get_db_connection()
+        prices = conn.execute(
+            'SELECT price, logged_at FROM price_logs WHERE product_id = ? ORDER BY logged_at',
+            (product_id,)
+        ).fetchall()
+        conn.close()
+        
+        return jsonify([dict(price) for price in prices])
+    except Exception as e:
+        return jsonify({'error': f'가격 이력 조회 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/alerts', methods=['POST'])
+def create_alert():
+    """알림 설정 - SSG 호환"""
+    try:
+        data = request.json
+        
+        required_fields = ['product_id', 'email', 'target_price']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'{field}가 필요합니다'}), 400
+        
+        conn = get_db_connection()
+        conn.execute(
+            'INSERT INTO alerts (product_id, user_email, target_price) VALUES (?, ?, ?)',
+            (data['product_id'], data['email'], data['target_price'])
+        )
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': '알림이 설정되었습니다'})
+        
+    except Exception as e:
+        return jsonify({'error': f'알림 설정 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/dashboard', methods=['GET'])
+def get_dashboard_data():
+    """대시보드 데이터 - SSG 호환"""
+    try:
+        conn = get_db_connection()
+        
+        # 전체 상품 수
+        total_products = conn.execute('SELECT COUNT(*) as count FROM products').fetchone()['count']
+        
+        # 활성 알림 수
+        active_alerts = conn.execute('SELECT COUNT(*) as count FROM alerts WHERE is_active = 1').fetchone()['count']
+        
+        # 최근 가격 변동
+        recent_changes = conn.execute('''
+            SELECT p.name, pl.price, pl.logged_at
+            FROM price_logs pl
+            JOIN products p ON pl.product_id = p.id
+            ORDER BY pl.logged_at DESC
+            LIMIT 10
+        ''').fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            'total_products': total_products,
+            'active_alerts': active_alerts,
+            'recent_changes': [dict(change) for change in recent_changes]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'대시보드 데이터 조회 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/compare', methods=['GET'])
+def compare_product_prices():
+    """상품 가격 비교 - SSG 호환"""
+    try:
+        keyword = request.args.get('keyword', '')
+        limit = request.args.get('limit', 10, type=int)
+        
+        if not keyword:
+            return jsonify({'error': '검색어가 필요합니다'}), 400
+        
+        # 11번가 API로 검색
+        results = eleventh_api.search_products(keyword=keyword, limit=limit)
+        products = results.get('products', [])
+        
+        # 가격 통계 계산
+        valid_prices = [p['price'] for p in products if p.get('price', 0) > 0]
+        price_stats = {}
+        
+        if valid_prices:
+            price_stats = {
+                'min_price': min(valid_prices),
+                'max_price': max(valid_prices),
+                'avg_price': int(sum(valid_prices) / len(valid_prices)),
+                'price_range': max(valid_prices) - min(valid_prices)
+            }
+        
+        return jsonify({
+            'keyword': keyword,
+            'products': products,
+            'total': len(products),
+            'price_stats': price_stats
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'가격 비교 중 오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/products/add-from-search', methods=['POST'])
+def add_product_from_search():
+    """검색 결과에서 상품 추가 - SSG 호환"""
+    try:
+        data = request.json
+        
+        required_fields = ['name', 'url', 'price']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'{field}가 필요합니다'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 중복 URL 체크
+        existing = cursor.execute('SELECT id FROM products WHERE url = ?', (data['url'],)).fetchone()
+        if existing:
+            return jsonify({'error': '이미 등록된 상품입니다'}), 400
+        
+        # 상품 추가 (11번가 데이터)
+        cursor.execute(
+            'INSERT INTO products (name, url, current_price, image_url, brand, source) VALUES (?, ?, ?, ?, ?, ?)',
+            (
+                data['name'], 
+                data['url'], 
+                data['price'],
+                data.get('image_url'),
+                data.get('brand', data.get('seller', '11번가')),
+                '11번가'
+            )
+        )
+        product_id = cursor.lastrowid
+        
+        # 가격 이력 추가
+        cursor.execute(
+            'INSERT INTO price_logs (product_id, price) VALUES (?, ?)',
+            (product_id, data['price'])
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'id': product_id,
+            'message': '상품이 추가되었습니다',
+            'product': {
+                'id': product_id,
+                'name': data['name'],
+                'url': data['url'],
+                'current_price': data['price'],
+                'image_url': data.get('image_url'),
+                'brand': data.get('brand', data.get('seller')),
+                'source': '11번가'
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'상품 추가 중 오류가 발생했습니다: {str(e)}'}), 500
 
 def _get_general_recommendations(limit: int):
     """일반 추천 상품"""
