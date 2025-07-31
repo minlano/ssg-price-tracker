@@ -4,7 +4,7 @@ echo SSG 가격 추적 시스템 - 전체 시작
 echo ========================================
 
 echo Backend 서버 시작 중...
-start "Backend Server" cmd /k "cd backend && pip install -r requirements.txt && python database.py && python app.py"
+start "Backend Server" cmd /k "cd backend && python app.py"
 
 echo 3초 대기 후 Frontend 시작...
 timeout /t 3 /nobreak > nul
