@@ -512,4 +512,4 @@ def _calculate_smart_target_price(current_price: int, price_history: list, alert
         return int(current_price * 0.95)  # 현재가 - 5%
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)  # 기존 앱과 포트 분리
+    app.run(debug=True, port=5000, host='0.0.0.0')  # 프론트엔드와 연결
