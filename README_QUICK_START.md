@@ -74,7 +74,7 @@ npm start -- --reset-cache
 ```
 
 ### 포트 충돌 오류
-- Backend 포트 변경: `app.py`에서 `port=5001`로 수정
+- Backend 포트 변경: `app.py`에서 `port=5000`로 수정
 - Frontend 포트 변경: `package.json`에서 `"start": "PORT=3001 react-scripts start"`
 
 ## 📱 주요 기능 사용법

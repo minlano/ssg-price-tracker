@@ -10,7 +10,7 @@ python database.py
 
 echo.
 echo API 서버 시작 중...
-echo 서버 주소: http://localhost:5001
+echo 서버 주소: http://localhost:5000
 echo.
 echo 사용 가능한 API:
 echo - 고급 검색: /api/search/advanced

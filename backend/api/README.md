@@ -93,7 +93,7 @@ cd backend/api
 python main.py
 ```
 
-서버는 `http://localhost:5001`에서 실행됩니다.
+서버는 `http://localhost:5000`에서 실행됩니다.
 
 ### 4. API 테스트
 ```bash
@@ -107,7 +107,7 @@ python test_api.py
 import requests
 
 # 고급 검색 (가격 필터, 정렬 적용)
-response = requests.get('http://localhost:5001/api/search/advanced', params={
+response = requests.get('http://localhost:5000/api/search/advanced', params={
     'keyword': '스마트폰',
     'min_price': 300000,
     'max_price': 1000000,
@@ -128,7 +128,7 @@ compare_data = {
     'product_ids': ['11st_1_스마트폰', '11st_2_스마트폰', '11st_3_스마트폰']
 }
 
-response = requests.post('http://localhost:5001/api/compare/products', 
+response = requests.post('http://localhost:5000/api/compare/products', 
                         json=compare_data)
 
 data = response.json()
@@ -139,7 +139,7 @@ print(f"가격 범위: {comparison['price_comparison']['lowest']:,}원 ~ {compar
 ### 최적 상품 찾기
 ```python
 # 가성비 좋은 상품 찾기
-response = requests.get('http://localhost:5001/api/compare/best-deal', params={
+response = requests.get('http://localhost:5000/api/compare/best-deal', params={
     'keyword': '노트북',
     'max_price': 1500000,
     'min_rating': 4.0,
@@ -154,7 +154,7 @@ for product in data['best_deals']:
 ### 데이터 분석
 ```python
 # 종합 분석 데이터
-response = requests.get('http://localhost:5001/api/data/analytics', params={
+response = requests.get('http://localhost:5000/api/data/analytics', params={
     'period': '30',
     'type': 'overview'
 })

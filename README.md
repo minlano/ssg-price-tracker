@@ -218,7 +218,7 @@ netstat -ano | findstr :3000  # Windows
 lsof -i :3000                 # Mac/Linux
 
 # 다른 포트 사용
-# Backend: app.py에서 port=5001
+# Backend: app.py에서 port=5000
 # Frontend: package.json에서 PORT=3001
 ```
 
