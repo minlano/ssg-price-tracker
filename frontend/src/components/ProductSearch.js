@@ -17,9 +17,16 @@ function ProductSearch({ onProductAdd }) {
     
     setIsSearching(true);
     try {
-      const apiUrl = selectedSource === 'NAVER' 
-        ? `/api/naver/search?keyword=${encodeURIComponent(keyword)}&limit=20`
-        : `/api/search?keyword=${encodeURIComponent(keyword)}&limit=20`;
+      // === 11번가 API 호출 추가 시작 ===
+      let apiUrl;
+      if (selectedSource === 'NAVER') {
+        apiUrl = `/api/naver/search?keyword=${encodeURIComponent(keyword)}&limit=20`;
+      } else if (selectedSource === '11ST') {
+        apiUrl = `/api/11st/search?keyword=${encodeURIComponent(keyword)}&limit=20`;
+      } else {
+        apiUrl = `/api/search?keyword=${encodeURIComponent(keyword)}&limit=20`;
+      }
+      // === 11번가 API 호출 추가 끝 ===
       
       const response = await fetch(apiUrl);
       const data = await response.json();
@@ -44,15 +51,38 @@ function ProductSearch({ onProductAdd }) {
     
     setIsComparing(true);
     try {
-      const apiUrl = selectedSource === 'NAVER' 
-        ? `/api/naver/compare?keyword=${encodeURIComponent(keyword)}&limit=10`
-        : `/api/compare?keyword=${encodeURIComponent(keyword)}&limit=10`;
+      // === 11번가 가격 비교 API 호출 추가 시작 ===
+      let apiUrl;
+      if (selectedSource === 'NAVER') {
+        apiUrl = `/api/naver/compare?keyword=${encodeURIComponent(keyword)}&limit=10`;
+      } else if (selectedSource === '11ST') {
+        // 11번가는 현재 가격 비교 API가 없으므로 검색 결과로 대체
+        apiUrl = `/api/11st/search?keyword=${encodeURIComponent(keyword)}&limit=10`;
+      } else {
+        apiUrl = `/api/compare?keyword=${encodeURIComponent(keyword)}&limit=10`;
+      }
+      // === 11번가 가격 비교 API 호출 추가 끝 ===
       
       const response = await fetch(apiUrl);
       const data = await response.json();
       
       if (response.ok) {
-        setCompareResults(data);
+        // === 11번가 응답 데이터 처리 추가 시작 ===
+        if (selectedSource === '11ST') {
+          // 11번가는 검색 결과를 가격 비교 형식으로 변환
+          const sortedProducts = data.products.sort((a, b) => a.price - b.price);
+          setCompareResults({
+            products: sortedProducts,
+            price_stats: {
+              min_price: Math.min(...sortedProducts.map(p => p.price)),
+              max_price: Math.max(...sortedProducts.map(p => p.price)),
+              avg_price: Math.round(sortedProducts.reduce((sum, p) => sum + p.price, 0) / sortedProducts.length)
+            }
+          });
+        } else {
+          setCompareResults(data);
+        }
+        // === 11번가 응답 데이터 처리 추가 끝 ===
       } else {
         alert(data.error || '가격 비교 중 오류가 발생했습니다.');
       }
@@ -68,38 +98,74 @@ function ProductSearch({ onProductAdd }) {
 
 
   // ========== 네이버 쇼핑 상품 추가 함수 시작 ==========
+  // const handleAddProduct = async (product) => {  // 기존 함수 주석 처리 시작
+  //   try {
+  //     const apiUrl = selectedSource === 'NAVER' 
+  //       ? '/api/naver/products/add-from-search'
+  //       : '/api/products/add-from-search';
+  //     
+  //     // 네이버 쇼핑의 경우 current_price 필드 사용
+  //     const productData = selectedSource === 'NAVER' 
+  //       ? { ...product, current_price: product.current_price || product.price }
+  //       : product;
+  //     
+  //     const response = await fetch(apiUrl, {
+  //       method: 'POST',
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //       },
+  //       body: JSON.stringify(productData),
+  //     });
+  //     
+  //     const data = await response.json();
+  //     
+  //     if (response.ok) {
+  //       alert(`${selectedSource} 상품이 추가되었습니다!`);
+  //       if (onProductAdd) onProductAdd(data.product);
+  //     } else {
+  //       alert(data.error || '상품 추가 중 오류가 발생했습니다.');
+  //     }
+  //   } catch (error) {
+  //     console.error('상품 추가 오류:', error);
+  //     alert('상품 추가 중 오류가 발생했습니다.');
+  //   }
+  // };
+  // 기존 함수 주석 처리 끝
+
+  // === 가격 추적 상품 추가 함수 (이메일 없이 임시 저장) 시작 ===
   const handleAddProduct = async (product) => {
     try {
-      const apiUrl = selectedSource === 'NAVER' 
-        ? '/api/naver/products/add-from-search'
-        : '/api/products/add-from-search';
-      
-      // 네이버 쇼핑의 경우 current_price 필드 사용
-      const productData = selectedSource === 'NAVER' 
-        ? { ...product, current_price: product.current_price || product.price }
-        : product;
-      
-      const response = await fetch(apiUrl, {
+      const watchlistData = {
+        product_name: product.name,
+        product_url: product.url || '#',
+        image_url: product.image_url,
+        source: selectedSource,
+        current_price: product.current_price || product.price,
+        user_email: 'temp@temp.com' // 임시 이메일
+      };
+
+      const response = await fetch('/api/watchlist/temp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(productData),
+        body: JSON.stringify(watchlistData),
       });
-      
+
       const data = await response.json();
-      
+
       if (response.ok) {
-        alert(`${selectedSource} 상품이 추가되었습니다!`);
-        if (onProductAdd) onProductAdd(data.product);
+        alert(`${selectedSource} 상품이 임시 추적 목록에 추가되었습니다! 추적 목록 탭에서 이메일을 입력하면 알림을 받을 수 있습니다.`);
+        if (onProductAdd) onProductAdd(data);
       } else {
-        alert(data.error || '상품 추가 중 오류가 발생했습니다.');
+        alert(data.error || '추적 목록 추가 중 오류가 발생했습니다.');
       }
     } catch (error) {
-      console.error('상품 추가 오류:', error);
-      alert('상품 추가 중 오류가 발생했습니다.');
+      console.error('추적 목록 추가 오류:', error);
+      alert('추적 목록 추가 중 오류가 발생했습니다.');
     }
   };
+  // === 가격 추적 상품 추가 함수 (이메일 없이 임시 저장) 끝 ===
   // ========== 네이버 쇼핑 상품 추가 함수 끝 ==========
 
   return (
@@ -121,13 +187,27 @@ function ProductSearch({ onProductAdd }) {
             >
               🔍 네이버쇼핑
             </button>
+            {/* === 11번가 탭 추가 시작 === */}
+            <button 
+              className={`source-btn ${selectedSource === '11ST' ? 'active' : ''}`}
+              onClick={() => setSelectedSource('11ST')}
+            >
+              🏪 11번가
+            </button>
+            {/* === 11번가 탭 추가 끝 === */}
           </div>
           {/* ========== 네이버 쇼핑 UI 끝 ========== */}
           <input
             type="text"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder={`${selectedSource === 'NAVER' ? '네이버쇼핑' : 'SSG'}에서 검색할 상품명을 입력하세요`}
+            placeholder={
+              // === 11번가 플레이스홀더 추가 시작 ===
+              selectedSource === 'NAVER' ? '네이버쇼핑에서 검색할 상품명을 입력하세요' :
+              selectedSource === '11ST' ? '11번가에서 검색할 상품명을 입력하세요' :
+              'SSG에서 검색할 상품명을 입력하세요'
+              // === 11번가 플레이스홀더 추가 끝 ===
+            }
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
           />
           <button onClick={handleSearch} disabled={isSearching}>

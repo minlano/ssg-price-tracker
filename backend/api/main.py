@@ -606,5 +606,106 @@ def _calculate_smart_target_price(current_price: int, price_history: list, alert
         # 현재가 기준
         return int(current_price * 0.95)  # 현재가 - 5%
 
+# === 가격 추적 API 엔드포인트 추가 시작 ===
+@app.route('/api/watchlist', methods=['GET'])
+def get_user_watchlist():
+    """사용자 추적 목록 조회"""
+    try:
+        user_email = request.args.get('user_email')
+        if not user_email:
+            return jsonify({'error': '이메일이 필요합니다'}), 400
+        
+        from price_tracker import price_tracker
+        watchlist = price_tracker.get_watchlist(user_email)
+        
+        return jsonify({
+            'watchlist': watchlist,
+            'total': len(watchlist),
+            'user_email': user_email
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'추적 목록 조회 실패: {str(e)}'}), 500
+
+@app.route('/api/watchlist', methods=['POST'])
+def add_to_watchlist():
+    """추적 목록에 상품 추가"""
+    try:
+        data = request.json
+        required_fields = ['product_name', 'product_url', 'source', 'current_price', 'user_email']
+        
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'{field}가 필요합니다'}), 400
+        
+        from price_tracker import price_tracker
+        watch_id = price_tracker.add_to_watchlist(
+            product_name=data['product_name'],
+            product_url=data['product_url'],
+            image_url=data.get('image_url'),
+            source=data['source'],
+            current_price=data['current_price'],
+            user_email=data['user_email'],
+            target_price=data.get('target_price')
+        )
+        
+        if watch_id:
+            return jsonify({
+                'message': '추적 목록에 추가되었습니다',
+                'watch_id': watch_id
+            })
+        else:
+            return jsonify({'error': '추적 목록 추가에 실패했습니다'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'추적 목록 추가 실패: {str(e)}'}), 500
+
+@app.route('/api/watchlist/<int:watch_id>', methods=['DELETE'])
+def remove_from_watchlist(watch_id):
+    """추적 목록에서 상품 제거"""
+    try:
+        user_email = request.args.get('user_email')
+        if not user_email:
+            return jsonify({'error': '이메일이 필요합니다'}), 400
+        
+        from price_tracker import price_tracker
+        price_tracker.remove_from_watchlist(watch_id, user_email)
+        
+        return jsonify({'message': '추적 목록에서 제거되었습니다'})
+        
+    except Exception as e:
+        return jsonify({'error': f'추적 목록 제거 실패: {str(e)}'}), 500
+
+@app.route('/api/price-history/<int:watch_id>', methods=['GET'])
+def get_price_history(watch_id):
+    """가격 히스토리 조회"""
+    try:
+        days = request.args.get('days', 7, type=int)
+        
+        from price_tracker import price_tracker
+        history = price_tracker.get_price_history(watch_id, days)
+        
+        return jsonify({
+            'price_history': history,
+            'watch_id': watch_id,
+            'days': days
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'가격 히스토리 조회 실패: {str(e)}'}), 500
+
+@app.route('/api/price-check', methods=['POST'])
+def manual_price_check():
+    """수동 가격 체크"""
+    try:
+        from price_tracker import price_tracker
+        price_tracker.check_all_prices()
+        
+        return jsonify({'message': '가격 체크가 완료되었습니다'})
+        
+    except Exception as e:
+        return jsonify({'error': f'가격 체크 실패: {str(e)}'}), 500
+# === 가격 추적 API 엔드포인트 추가 끝 ===
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')  # 프론트엔드와 연결

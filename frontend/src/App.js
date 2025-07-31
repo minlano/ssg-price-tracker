@@ -3,6 +3,9 @@ import './App.css';
 import Dashboard from './components/Dashboard';
 import ProductSearch from './components/ProductSearch';
 import ProductList from './components/ProductList';
+// === 가격 추적 컴포넌트 import 시작 ===
+import WatchList from './components/WatchList';
+// === 가격 추적 컴포넌트 import 끝 ===
 
 function App() {
   const [backendStatus, setBackendStatus] = useState('확인 중...');
@@ -61,8 +64,12 @@ function App() {
         return <Dashboard />;
       case 'search':
         return <ProductSearch onProductAdd={handleProductAdd} />;
+      // case 'products':  // 기존 코드 주석 처리
+      //   return <ProductList refreshTrigger={refreshTrigger} />;
+      // === 가격 추적 목록 탭 추가 시작 ===
       case 'products':
-        return <ProductList refreshTrigger={refreshTrigger} />;
+        return <WatchList />;
+      // === 가격 추적 목록 탭 추가 끝 ===
       default:
         return <Dashboard />;
     }
