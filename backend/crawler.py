@@ -69,7 +69,10 @@ def search_ssg_products_legacy(keyword, page=1, limit=20):
         
         print(f"📦 총 {len(product_elements)}개 상품 요소 발견")
         
-        # 상품 정보 추출
+        # 상품 정보 추출 (중복 제거 로직 추가)
+        seen_urls = set()
+        seen_names = set()
+        
         for element in product_elements[:limit * 2]:
             if len(products) >= limit:
                 break
@@ -77,8 +80,18 @@ def search_ssg_products_legacy(keyword, page=1, limit=20):
             try:
                 product_info = extract_ssg_product_info(element, keyword)
                 if product_info and product_info.get('name') and len(product_info['name']) > 5:
-                    products.append(product_info)
-                    print(f"✅ 상품 추출: {product_info['name'][:50]}...")
+                    # 중복 체크
+                    url = product_info.get('url', '')
+                    name = product_info.get('name', '').strip()
+                    
+                    if (url not in seen_urls and 
+                        name not in seen_names and 
+                        len(name) > 5):
+                        
+                        products.append(product_info)
+                        seen_urls.add(url)
+                        seen_names.add(name)
+                        print(f"✅ 상품 추출: {product_info['name'][:50]}...")
                     
             except Exception as e:
                 print(f"⚠️ 상품 정보 추출 실패: {e}")

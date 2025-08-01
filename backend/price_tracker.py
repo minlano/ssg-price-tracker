@@ -211,6 +211,18 @@ class PriceTracker:
                 ''', (product_name, current_price, product_url, image_url, '', source))
                 product_id = cursor.lastrowid
             
+            # 가격 로그 추가 (기존 price_logs 테이블)
+            cursor.execute('''
+                INSERT INTO price_logs (product_id, price, logged_at)
+                VALUES (?, ?, datetime('now', '+09:00'))
+            ''', (product_id, current_price))
+            
+            # 가격 히스토리 추가 (추적용 price_history 테이블)
+            cursor.execute('''
+                INSERT INTO price_history (product_id, price, recorded_at)
+                VALUES (?, ?, datetime('now', '+09:00'))
+            ''', (product_id, current_price))
+            
             # 임시 알림 설정 (is_active = 0으로 설정)
             if target_price is None:
                 target_price = int(current_price * 0.9)
@@ -286,6 +298,41 @@ class PriceTracker:
             ''', (user_email,))
             
             activated_count = cursor.rowcount
+            
+            # 활성화된 상품들의 가격 히스토리 확인 및 보완
+            if activated_count > 0:
+                cursor.execute('''
+                    SELECT DISTINCT product_id 
+                    FROM alerts 
+                    WHERE user_email = ? AND is_active = 1
+                ''', (user_email,))
+                
+                activated_products = cursor.fetchall()
+                
+                for (product_id,) in activated_products:
+                    # price_history에 데이터가 있는지 확인
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM price_history WHERE product_id = ?
+                    ''', (product_id,))
+                    
+                    history_count = cursor.fetchone()[0]
+                    
+                    # price_history에 데이터가 없으면 현재 가격으로 초기 데이터 추가
+                    if history_count == 0:
+                        cursor.execute('''
+                            SELECT current_price FROM products WHERE id = ?
+                        ''', (product_id,))
+                        
+                        current_price = cursor.fetchone()[0]
+                        
+                        if current_price:
+                            cursor.execute('''
+                                INSERT INTO price_history (product_id, price, recorded_at)
+                                VALUES (?, ?, datetime('now', '+09:00'))
+                            ''', (product_id, current_price))
+                            
+                            logger.info(f"✅ 상품 ID {product_id}의 초기 가격 히스토리 추가")
+            
             conn.commit()
             
             logger.info(f"✅ {activated_count}개 상품이 추적 목록으로 활성화됨")

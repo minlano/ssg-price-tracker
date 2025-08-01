@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS products (
     brand TEXT,
     description TEXT,
     source TEXT DEFAULT 'SSG',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT (datetime('now', '+09:00'))
 );
 
 -- 가격 이력 테이블
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS price_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id INTEGER NOT NULL,
     price INTEGER NOT NULL,
-    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    logged_at TIMESTAMP DEFAULT (datetime('now', '+09:00')),
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 );
 
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     user_email TEXT NOT NULL,
     target_price INTEGER NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT (datetime('now', '+09:00')),
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 );
 
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS watch_list (
     target_price REAL,
     user_email TEXT NOT NULL,
     is_active INTEGER DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT (datetime('now', '+09:00')),
+    updated_at TIMESTAMP DEFAULT (datetime('now', '+09:00'))
 );
 
 -- 가격 변동 히스토리 테이블
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS temp_watch_list (
     source TEXT NOT NULL,
     current_price REAL NOT NULL,
     target_price REAL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT (datetime('now', '+09:00'))
 );
 
 -- 인덱스 생성

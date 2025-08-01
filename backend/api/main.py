@@ -1,6 +1,5 @@
 # Flask API 메인 애플리케이션 (고도화 버전)
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -49,10 +48,10 @@ except ImportError:
     print("⚠️ config 모듈을 찾을 수 없습니다.")
 import sqlite3
 from datetime import datetime
+import traceback
 
 # Flask 앱 생성
 app = Flask(__name__)
-CORS(app)
 
 # 한글 인코딩 설정
 app.config['JSON_AS_ASCII'] = False
@@ -705,7 +704,180 @@ def manual_price_check():
         
     except Exception as e:
         return jsonify({'error': f'가격 체크 실패: {str(e)}'}), 500
+
+@app.route('/api/auto-email', methods=['GET'])
+def get_auto_email():
+    """자동 이메일 감지 - 데이터베이스에서 가장 최근에 사용된 이메일 반환"""
+    if not DATABASE_AVAILABLE:
+        return jsonify({'error': '데이터베이스를 사용할 수 없습니다.'}), 500
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.execute('''
+            SELECT DISTINCT user_email 
+            FROM alerts 
+            WHERE is_active = 1 
+            ORDER BY id DESC 
+            LIMIT 1
+        ''')
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return jsonify({
+                'email': result[0],
+                'found': True
+            })
+        else:
+            return jsonify({
+                'email': '',
+                'found': False
+            })
+            
+    except Exception as e:
+        return jsonify({'error': f'이메일 감지 오류: {str(e)}'}), 500
+
 # === 가격 추적 API 엔드포인트 추가 끝 ===
+
+@app.route('/api/search/enhanced', methods=['GET'])
+def search_products_enhanced():
+    """향상된 상품 검색 API (페이지네이션 및 필터 지원)"""
+    try:
+        # 크롤러 모듈 import 확인
+        try:
+            from crawler import search_ssg_products
+            CRAWLER_AVAILABLE = True
+        except ImportError:
+            CRAWLER_AVAILABLE = False
+        
+        if not CRAWLER_AVAILABLE:
+            return jsonify({
+                'error': '크롤러를 사용할 수 없습니다',
+                'message': '크롤러 모듈 로드에 실패했습니다'
+            }), 500
+        
+        # 파라미터 추출
+        keyword = request.args.get('keyword', '').strip()
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 20, type=int)
+        
+        # 필터 파라미터
+        min_price = request.args.get('min_price', type=int)
+        max_price = request.args.get('max_price', type=int)
+        brand = request.args.get('brand', '').strip()
+        sort_by = request.args.get('sort_by', 'relevance')  # relevance, price_asc, price_desc, name
+        
+        # 키워드 유효성 검사
+        if not keyword:
+            return jsonify({
+                'error': '검색어를 입력해주세요',
+                'message': '사용 예시: /api/search/enhanced?keyword=아이폰&page=1&limit=20'
+            }), 400
+        
+        if len(keyword) > 50:
+            return jsonify({'error': '검색어는 50자 이내로 입력해주세요'}), 400
+        
+        if limit > 50:
+            limit = 50  # 최대 50개로 제한
+        
+        if page < 1:
+            page = 1
+        
+        # 검색 시작 시간 기록
+        start_time = datetime.now()
+        
+        print(f"🔍 향상된 검색 요청: '{keyword}' (page: {page}, limit: {limit})")
+        print(f"🔍 필터: min_price={min_price}, max_price={max_price}, brand={brand}, sort_by={sort_by}")
+        
+        # SSG 상품 검색 실행 (더 많은 결과를 가져와서 필터링)
+        base_limit = limit * 3  # 필터링을 위해 더 많은 결과 가져오기
+        products = search_ssg_products(keyword, page=page, limit=base_limit)
+        
+        # 필터링 적용
+        filtered_products = []
+        for product in products:
+            price = product.get('price', 0) or product.get('current_price', 0)
+            
+            # 가격 필터
+            if min_price is not None and price < min_price:
+                continue
+            if max_price is not None and price > max_price:
+                continue
+            
+            # 브랜드 필터
+            if brand and product.get('brand', '').lower() != brand.lower():
+                continue
+            
+            filtered_products.append(product)
+        
+        # 정렬 적용
+        if sort_by == 'price_asc':
+            filtered_products.sort(key=lambda x: x.get('price', 0) or x.get('current_price', 0))
+        elif sort_by == 'price_desc':
+            filtered_products.sort(key=lambda x: x.get('price', 0) or x.get('current_price', 0), reverse=True)
+        elif sort_by == 'name':
+            filtered_products.sort(key=lambda x: x.get('name', ''))
+        
+        # 페이지네이션 적용
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_products = filtered_products[start_idx:end_idx]
+        
+        # 검색 완료 시간 계산
+        end_time = datetime.now()
+        search_duration = (end_time - start_time).total_seconds()
+        
+        print(f"✅ 향상된 검색 완료: {len(paginated_products)}개 상품 (전체: {len(filtered_products)}개), {search_duration:.2f}초")
+        
+        # 응답 데이터 구성
+        response_data = {
+            'products': paginated_products,
+            'pagination': {
+                'current_page': page,
+                'total_pages': (len(filtered_products) + limit - 1) // limit,
+                'total_results': len(filtered_products),
+                'results_per_page': limit,
+                'has_next': len(filtered_products) > end_idx,
+                'has_prev': page > 1
+            },
+            'filters': {
+                'applied': {
+                    'min_price': min_price,
+                    'max_price': max_price,
+                    'brand': brand,
+                    'sort_by': sort_by
+                },
+                'available_brands': list(set([p.get('brand', '') for p in filtered_products if p.get('brand')])),
+                'price_range': {
+                    'min': min([p.get('price', 0) or p.get('current_price', 0) for p in filtered_products]) if filtered_products else 0,
+                    'max': max([p.get('price', 0) or p.get('current_price', 0) for p in filtered_products]) if filtered_products else 0
+                }
+            },
+            'search_info': {
+                'keyword': keyword,
+                'search_duration': round(search_duration, 3),
+                'search_time': start_time.isoformat(),
+                'source': 'SSG',
+                'cache_used': search_duration < 0.1
+            }
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        print(f"❌ 향상된 검색 오류: {e}")
+        print(f"상세 오류: {error_trace}")
+        
+        return jsonify({
+            'error': f'검색 중 오류가 발생했습니다: {str(e)}',
+            'keyword': request.args.get('keyword', ''),
+            'timestamp': datetime.now().isoformat(),
+            'error_type': type(e).__name__
+        }), 500
+
+# === 향상된 검색 API 엔드포인트 추가 끝 ===
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')  # 프론트엔드와 연결

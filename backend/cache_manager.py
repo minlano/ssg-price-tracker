@@ -12,7 +12,6 @@ try:
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
-    print("⚠️ Redis 라이브러리가 없습니다. 메모리 캐시를 사용합니다.")
 
 class CacheManager:
     """Redis 캐시 매니저"""

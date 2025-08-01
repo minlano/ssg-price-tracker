@@ -7,9 +7,6 @@ function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-    // 30초마다 대시보드 데이터 새로고침
-    const interval = setInterval(fetchDashboardData, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   const fetchDashboardData = async () => {
@@ -36,14 +33,17 @@ function Dashboard() {
 
   return (
     <div className="dashboard">
-      <h3>📊 대시보드</h3>
+      <div className="dashboard-header">
+        <h3>📊 대시보드</h3>
+      </div>
       
+      {/* 기본 통계 */}
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-icon">📦</div>
           <div className="stat-content">
             <h4>등록된 상품</h4>
-            <p className="stat-number">{dashboardData.total_products}</p>
+            <p className="stat-number">{dashboardData.total_products || 0}</p>
             <span className="stat-label">개</span>
           </div>
         </div>
@@ -52,7 +52,7 @@ function Dashboard() {
           <div className="stat-icon">🔔</div>
           <div className="stat-content">
             <h4>활성 알림</h4>
-            <p className="stat-number">{dashboardData.active_alerts}</p>
+            <p className="stat-number">{dashboardData.active_alerts || 0}</p>
             <span className="stat-label">개</span>
           </div>
         </div>
@@ -65,25 +65,28 @@ function Dashboard() {
             <span className="stat-label">건</span>
           </div>
         </div>
+
+        <div className="stat-card">
+          <div className="stat-icon">💰</div>
+          <div className="stat-content">
+            <h4>평균 가격</h4>
+            <p className="stat-number">{dashboardData.average_price?.toLocaleString() || 0}</p>
+            <span className="stat-label">원</span>
+          </div>
+        </div>
       </div>
 
-      {dashboardData.recent_changes && dashboardData.recent_changes.length > 0 && (
-        <div className="recent-changes">
-          <h4>📈 최근 가격 변동</h4>
-          <div className="changes-list">
-            {dashboardData.recent_changes.slice(0, 8).map((change, index) => (
-              <div key={index} className="change-item">
-                <div className="change-info">
-                  <span className="product-name">{change.name}</span>
-                  <span className="change-price">{change.price.toLocaleString()}원</span>
-                </div>
-                <div className="change-date">
-                  {new Date(change.logged_at).toLocaleDateString('ko-KR', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
+      {/* 최근 추가된 상품 */}
+      {dashboardData.recent_products && dashboardData.recent_products.length > 0 && (
+        <div className="products-section">
+          <h4>🆕 최근 추가된 상품</h4>
+          <div className="products-grid">
+            {dashboardData.recent_products.slice(0, 5).map((product, index) => (
+              <div key={index} className="product-card">
+                <div className="product-info">
+                  <h5>{product.name}</h5>
+                  <p className="product-price">{product.price?.toLocaleString()}원</p>
+                  <p className="product-brand">{product.brand} • {product.source}</p>
                 </div>
               </div>
             ))}

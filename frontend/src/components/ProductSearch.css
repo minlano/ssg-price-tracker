@@ -200,6 +200,220 @@
 }
 
 .source-btn.active:hover {
-  background-color: #4fa8c5 !important;
+  background-color: #4fa8c5;
+}
+
+.clear-history-btn {
+  background-color: #f44336 !important;
+  padding: 10px 15px;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.3s;
+}
+
+.clear-history-btn:hover {
+  background-color: #d32f2f !important;
 }
 /* ========== 네이버 쇼핑 스타일 끝 ========== */
+
+/* ========== 검색 필터 스타일 시작 ========== */
+.search-filters {
+  margin: 20px 0;
+  padding: 15px;
+  background-color: rgba(97, 218, 251, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(97, 218, 251, 0.2);
+}
+
+.filter-section h5 {
+  color: #61dafb;
+  margin-bottom: 15px;
+  font-size: 16px;
+}
+
+.filter-controls {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 120px;
+}
+
+.filter-group label {
+  font-size: 12px;
+  color: #ccc;
+  font-weight: bold;
+}
+
+.filter-group input,
+.filter-group select {
+  padding: 8px 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #333;
+  color: white;
+  font-size: 14px;
+}
+
+.filter-group input:focus,
+.filter-group select:focus {
+  outline: none;
+  border-color: #61dafb;
+  box-shadow: 0 0 0 2px rgba(97, 218, 251, 0.2);
+}
+
+.filter-actions {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+}
+
+.apply-filters-btn,
+.clear-filters-btn {
+  padding: 8px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.apply-filters-btn {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.apply-filters-btn:hover {
+  background-color: #45a049;
+}
+
+.clear-filters-btn {
+  background-color: #f44336;
+  color: white;
+}
+
+.clear-filters-btn:hover {
+  background-color: #d32f2f;
+}
+
+/* ========== 무한 스크롤 스타일 시작 ========== */
+.products-grid {
+  max-height: 600px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #61dafb #333;
+}
+
+.products-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.products-grid::-webkit-scrollbar-track {
+  background: #333;
+  border-radius: 4px;
+}
+
+.products-grid::-webkit-scrollbar-thumb {
+  background: #61dafb;
+  border-radius: 4px;
+}
+
+.products-grid::-webkit-scrollbar-thumb:hover {
+  background: #4fa8c5;
+}
+
+.loading-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  grid-column: 1 / -1;
+}
+
+.loading-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(97, 218, 251, 0.3);
+  border-top: 3px solid #61dafb;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 10px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-more p {
+  color: #61dafb;
+  font-size: 14px;
+  margin: 0;
+}
+
+.pagination-info {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+  text-align: center;
+}
+
+.pagination-info p {
+  color: #ccc;
+  font-size: 14px;
+  margin: 0;
+}
+
+.scroll-hint {
+  color: #61dafb;
+  font-style: italic;
+}
+
+/* ========== 반응형 디자인 시작 ========== */
+@media (max-width: 768px) {
+  .filter-controls {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .filter-group {
+    min-width: auto;
+    width: 100%;
+  }
+  
+  .filter-actions {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .products-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .search-controls {
+    flex-direction: column;
+  }
+  
+  .search-controls input {
+    min-width: auto;
+  }
+}
+/* ========== 반응형 디자인 끝 ========== */

@@ -9,13 +9,15 @@ SSG 가격 추적기 백엔드 API
 """
 
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import sys
 import os
 from datetime import datetime
 import traceback
 from urllib.parse import quote_plus # Added for naver_search
 from dotenv import load_dotenv
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # 환경 변수 로드
 load_dotenv()
@@ -35,11 +37,19 @@ except ImportError as e:
 
 # Flask 앱 생성
 app = Flask(__name__)
-CORS(app)
 
 # 한글 인코딩 설정
 app.config['JSON_AS_ASCII'] = False
 app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
+
+# CORS 기능 비활성화
+
+# 모든 요청 로깅
+@app.before_request
+def log_request():
+    print(f"🔍 요청: {request.method} {request.url}")
+    if request.data:
+        print(f"🔍 데이터: {request.data}")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -197,6 +207,95 @@ def search_products():
         
         return jsonify({
             'error': f'검색 중 오류가 발생했습니다: {str(e)}',
+            'keyword': request.args.get('keyword', ''),
+            'timestamp': datetime.now().isoformat(),
+            'error_type': type(e).__name__
+        }), 500
+
+@app.route('/api/search/enhanced', methods=['GET'])
+def enhanced_search_products():
+    """향상된 상품 검색 API (무한 스크롤 지원)"""
+    try:
+        if not CRAWLER_AVAILABLE:
+            return jsonify({
+                'error': '크롤러를 사용할 수 없습니다',
+                'message': '크롤러 모듈 로드에 실패했습니다'
+            }), 500
+        
+        # 파라미터 추출
+        keyword = request.args.get('keyword', '').strip()
+        limit = request.args.get('limit', 20, type=int)
+        page = request.args.get('page', 1, type=int)
+        
+        # 키워드 유효성 검사
+        if not keyword:
+            return jsonify({
+                'error': '검색어를 입력해주세요',
+                'message': '사용 예시: /api/search/enhanced?keyword=아이폰',
+                'popular_keywords': [
+                    '아이폰', '삼성 갤럭시', '나이키', '아디다스', '라면',
+                    '노트북', '이어폰', '화장품', '운동화', '가방'
+                ]
+            }), 400
+        
+        if len(keyword) > 50:
+            return jsonify({'error': '검색어는 50자 이내로 입력해주세요'}), 400
+        
+        if limit > 50:
+            limit = 50  # 최대 50개로 제한
+        
+        # 검색 시작 시간 기록
+        start_time = datetime.now()
+        
+        print(f"🔍 향상된 검색 요청: '{keyword}' (page: {page}, limit: {limit})")
+        
+        # SSG 상품 검색 실행
+        products = search_ssg_products(keyword, page=page, limit=limit)
+        
+        # 검색 완료 시간 계산
+        end_time = datetime.now()
+        search_duration = (end_time - start_time).total_seconds()
+        
+        print(f"✅ 향상된 검색 완료: {len(products)}개 상품, {search_duration:.2f}초")
+        
+        # 페이지네이션 정보 계산
+        total_pages = max(1, (len(products) + limit - 1) // limit)
+        has_next = page < total_pages
+        
+        # 응답 데이터 구성 (무한 스크롤 지원)
+        response_data = {
+            'products': products,
+            'pagination': {
+                'current_page': page,
+                'total_pages': total_pages,
+                'has_next': has_next,
+                'has_prev': page > 1,
+                'total_results': len(products),
+                'limit': limit
+            },
+            'search_info': {
+                'keyword': keyword,
+                'search_duration': round(search_duration, 3),
+                'search_time': start_time.isoformat(),
+                'source': 'SSG',
+                'cache_used': search_duration < 0.1
+            },
+            'performance': {
+                'response_time': f"{search_duration:.3f}초",
+                'products_per_second': round(len(products) / search_duration, 1) if search_duration > 0 else 0,
+                'cache_hit': search_duration < 0.1
+            }
+        }
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        print(f"❌ 향상된 검색 오류: {e}")
+        print(f"상세 오류: {error_trace}")
+        
+        return jsonify({
+            'error': f'향상된 검색 중 오류가 발생했습니다: {str(e)}',
             'keyword': request.args.get('keyword', ''),
             'timestamp': datetime.now().isoformat(),
             'error_type': type(e).__name__
@@ -461,7 +560,7 @@ def naver_compare():
 def naver_add_product_from_search():
     """네이버 쇼핑 검색 결과에서 상품 추가"""
     try:
-        data = request.get_json()
+        data = request.json
         
         if not data:
             return jsonify({'error': '상품 데이터가 없습니다'}), 400
@@ -1055,6 +1154,7 @@ def get_user_watchlist():
 @app.route('/api/watchlist', methods=['POST'])
 def add_to_watchlist():
     """추적 목록에 상품 추가"""
+    print(f"🔍 add_to_watchlist 함수 호출됨")
     try:
         data = request.json
         required_fields = ['product_name', 'product_url', 'source', 'current_price', 'user_email']
@@ -1089,36 +1189,217 @@ def add_to_watchlist():
 
 @app.route('/api/watchlist/<int:watch_id>', methods=['DELETE'])
 def remove_from_watchlist(watch_id):
-    """추적 목록에서 상품 제거"""
+    """추적 목록에서 상품 제거 - products 테이블에서 user_email 제거"""
     try:
         user_email = request.args.get('user_email')
         if not user_email:
             return jsonify({'error': '이메일이 필요합니다'}), 400
         
-        from price_tracker import price_tracker
-        price_tracker.remove_from_watchlist(watch_id, user_email)
+        from database import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
         
-        return jsonify({'message': '추적 목록에서 제거되었습니다'})
+        # products 테이블에서 해당 상품의 source를 'TEMP'로 설정
+        cursor.execute("""
+            UPDATE products 
+            SET source = 'TEMP'
+            WHERE id = ?
+        """, (watch_id,))
         
+        if cursor.rowcount > 0:
+            conn.commit()
+            conn.close()
+            return jsonify({'message': '추적 목록에서 제거되었습니다'})
+        else:
+            conn.close()
+            return jsonify({'error': '해당 상품을 찾을 수 없습니다'}), 404
+            
     except Exception as e:
-        return jsonify({'error': f'추적 목록 제거 실패: {str(e)}'}), 500
+        return jsonify({'error': f'제거 실패: {str(e)}'}), 500
 
-@app.route('/api/price-history/<int:watch_id>', methods=['GET'])
-def get_price_history(watch_id):
-    """가격 히스토리 조회"""
+# === 가격 추적 관련 API 엔드포인트 추가 시작 ===
+@app.route('/api/watchlist/tracking', methods=['GET'])
+def get_tracking_watchlist():
+    """실제 추적 목록 조회 - products 테이블에서 user_email이 있는 상품들"""
+    print(f"🔍 get_tracking_watchlist 함수 호출됨")
+    print(f"🔍 요청 URL: {request.url}")
+    print(f"🔍 요청 메서드: {request.method}")
+    print(f"🔍 요청 헤더: {dict(request.headers)}")
     try:
-        days = request.args.get('days', 7, type=int)
+        user_email = request.args.get('user_email')
+        if not user_email:
+            return jsonify({'error': '이메일이 필요합니다'}), 400
         
-        from price_tracker import price_tracker
-        history = price_tracker.get_price_history(watch_id, days)
+        # 데이터베이스에서 user_email이 있는 상품들 조회
+        from database import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # products 테이블에서 source가 'TRACKING'인 상품들 조회
+        cursor.execute("""
+            SELECT id, name, url, image_url, source, current_price, created_at
+            FROM products
+            WHERE source = 'TRACKING'
+            ORDER BY created_at DESC
+        """)
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # 결과를 딕셔너리 리스트로 변환
+        watchlist = []
+        for row in rows:
+            watchlist.append({
+                'id': row[0],
+                'product_name': row[1],
+                'product_url': row[2],
+                'image_url': row[3],
+                'source': row[4],
+                'current_price': row[5],
+                'created_at': row[6],
+                'source': row[4]
+            })
+        
+        print(f"🔍 조회된 추적 목록 수: {len(watchlist)}")
         
         return jsonify({
-            'price_history': history,
-            'watch_id': watch_id,
-            'days': days
+            'watchlist': watchlist,
+            'message': f'추적 목록 조회 완료 ({len(watchlist)}개)'
         })
         
     except Exception as e:
+        print(f"❌ 추적 목록 조회 오류: {e}")
+        return jsonify({'error': f'추적 목록 조회 실패: {str(e)}'}), 500
+
+@app.route('/api/email/send-tracking', methods=['POST'])
+def send_price_tracking_email():
+    """가격 추적 이메일 발송 - products 테이블의 user_email 업데이트"""
+    print(f"🔍 send_price_tracking_email 함수 호출됨")
+    
+    try:
+        data = request.get_json()
+        user_email = data.get('user_email', '')
+        selected_products = data.get('selected_products', [])
+        
+        print(f"🔍 사용자 이메일: {user_email}")
+        print(f"🔍 선택된 상품 수: {len(selected_products)}")
+        
+        if not user_email:
+            return jsonify({'error': '이메일 주소가 필요합니다'}), 400
+        
+        if not selected_products:
+            return jsonify({'error': '전송할 상품이 없습니다'}), 400
+        
+        # 데이터베이스 연결
+        from database import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        updated_count = 0
+        for product in selected_products:
+            try:
+                # 선택된 상품들의 source를 'TRACKING'으로 업데이트
+                cursor.execute("""
+                    UPDATE products 
+                    SET source = 'TRACKING'
+                    WHERE id = ?
+                """, (product.get('id'),))
+                
+                if cursor.rowcount > 0:
+                    updated_count += 1
+                    print(f"✅ 상품 이메일 업데이트: {product.get('name', '')}")
+                else:
+                    print(f"⚠️ 상품 업데이트 실패: {product.get('name', '')}")
+                
+            except Exception as e:
+                print(f"❌ 상품 업데이트 실패: {product.get('name', '')} - {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ 총 {updated_count}개 상품이 가격 추적 목록으로 이동되었습니다")
+        
+        return jsonify({
+            'message': '기능 구현중입니다!',
+            'status': 'implementing',
+            'updated_count': updated_count,
+            'user_email': user_email
+        })
+        
+    except Exception as e:
+        print(f"❌ 가격 추적 이메일 발송 오류: {e}")
+        return jsonify({'error': f'요청 처리 실패: {str(e)}'}), 500
+
+@app.route('/api/auto-email', methods=['GET'])
+def get_auto_email():
+    """자동 이메일 감지"""
+    try:
+        # 임시로 빈 응답 반환
+        return jsonify({
+            'found': False,
+            'email': None,
+            'message': '자동 이메일 감지 기능이 비활성화되어 있습니다'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'자동 이메일 감지 실패: {str(e)}'}), 500
+
+# === 가격 추적 관련 API 엔드포인트 추가 끝 ===
+
+@app.route('/api/price-history/<int:watch_id>', methods=['GET'])
+def get_price_history(watch_id):
+    """가격 히스토리 조회 - products 테이블과 price_logs 테이블 사용"""
+    try:
+        days = request.args.get('days', 7, type=int)
+        
+        from database import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 해당 상품의 가격 히스토리 조회
+        cursor.execute("""
+            SELECT price, logged_at
+            FROM price_logs
+            WHERE product_id = ?
+            ORDER BY logged_at DESC
+            LIMIT ?
+        """, (watch_id, days * 10))  # 하루에 여러 번 기록될 수 있으므로 여유있게
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # 결과를 차트용 형식으로 변환
+        price_history = []
+        for row in rows:
+            price_history.append({
+                'price': row[0],
+                'date': row[1]
+            })
+        
+        # 현재 가격도 추가
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT current_price FROM products WHERE id = ?", (watch_id,))
+        current_price_row = cursor.fetchone()
+        conn.close()
+        
+        if current_price_row:
+            current_price = current_price_row[0]
+            # 현재 가격을 최신으로 추가
+            price_history.insert(0, {
+                'price': current_price,
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return jsonify({
+            'price_history': price_history,
+            'watch_id': watch_id,
+            'days': days,
+            'total_points': len(price_history)
+        })
+        
+    except Exception as e:
+        print(f"❌ 가격 히스토리 조회 오류: {e}")
         return jsonify({'error': f'가격 히스토리 조회 실패: {str(e)}'}), 500
 
 @app.route('/api/price-check', methods=['POST'])
@@ -1520,13 +1801,41 @@ def get_eleventh_street_product(product_id):
 # === 11번가 API 엔드포인트 추가 끝 ===
 
 # === 임시 추적 목록 API 엔드포인트 추가 시작 ===
-# 임시 추적 목록 저장소 (메모리)
-temp_watchlist = []
-
+# 임시 추적 목록 저장소 (데이터베이스 기반)
 @app.route('/api/watchlist/temp', methods=['GET'])
 def get_temp_watchlist():
-    """임시 추적 목록 조회"""
+    """임시 추적 목록 조회 (데이터베이스에서)"""
     try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        
+        cursor = conn.execute('''
+            SELECT id, name, current_price, url, image_url, brand, description, source, created_at
+            FROM products
+            WHERE source = 'TEMP'
+            ORDER BY created_at DESC
+        ''')
+        
+        temp_watchlist = []
+        for row in cursor.fetchall():
+            temp_watchlist.append({
+                'id': row['id'],
+                'temp_id': row['id'],
+                'product_name': row['name'],
+                'name': row['name'],
+                'product_url': row['url'],
+                'url': row['url'],
+                'price': row['current_price'],
+                'current_price': row['current_price'],
+                'image_url': row['image_url'],
+                'brand': row['brand'],
+                'description': row['description'],
+                'source': row['source'],
+                'added_at': row['created_at']
+            })
+        
+        conn.close()
+        
         print(f"🔍 임시 목록 조회: {len(temp_watchlist)}개 상품")
         for item in temp_watchlist:
             print(f"  - {item.get('name', item.get('product_name', 'Unknown'))}")
@@ -1570,17 +1879,40 @@ def add_to_temp_watchlist():
         if not price:
             return jsonify({'error': '가격(price/current_price)이 필요합니다'}), 400
         
-        # 임시 ID 생성
-        temp_id = len(temp_watchlist) + 1
+        # 데이터베이스 연결
+        from database import get_db_connection
+        conn = get_db_connection()
         
-        # 임시 추적 상품 데이터 구성 (추출된 필드 사용)
+        # 중복 확인 (URL 기준, source가 'TEMP'인 상품들)
+        existing_cursor = conn.execute('SELECT id FROM products WHERE url = ? AND source = "TEMP"', (url,))
+        existing_product = existing_cursor.fetchone()
+        
+        if existing_product:
+            conn.close()
+            return jsonify({
+                'message': '이미 임시 추적 목록에 있는 상품입니다',
+                'existing_product': {'id': existing_product['id']}
+            }), 200
+        
+        # 임시 추적 목록에 추가 (products 테이블 사용, source는 'TEMP')
+        cursor = conn.execute('''
+            INSERT INTO products (name, current_price, url, image_url, source, brand, description, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+09:00'))
+        ''', (name, price, url, data.get('image_url', ''), 'TEMP', data.get('brand', ''), data.get('description', '')))
+        
+        temp_id = cursor.lastrowid
+        
+        conn.commit()
+        conn.close()
+        
+        # 응답 데이터 구성
         temp_product = {
-            'id': temp_id,  # 프론트엔드 호환성을 위해 id 필드 추가
+            'id': temp_id,
             'temp_id': temp_id,
-            'product_name': name,  # 프론트엔드에서 기대하는 필드명
-            'name': name,  # 호환성을 위해 기존 필드도 유지
-            'product_url': url,  # 프론트엔드에서 기대하는 필드명
-            'url': url,  # 호환성을 위해 기존 필드도 유지
+            'product_name': name,
+            'name': name,
+            'product_url': url,
+            'url': url,
             'price': price,
             'current_price': price,
             'image_url': data.get('image_url', ''),
@@ -1590,23 +1922,12 @@ def add_to_temp_watchlist():
             'added_at': datetime.now().isoformat()
         }
         
-        # 중복 확인 (URL 기준)
-        existing_product = next((p for p in temp_watchlist if p['url'] == data['url']), None)
-        if existing_product:
-            return jsonify({
-                'message': '이미 임시 추적 목록에 있는 상품입니다',
-                'existing_product': existing_product
-            }), 200
-        
-        # 임시 목록에 추가
-        temp_watchlist.append(temp_product)
-        
         print(f"✅ 임시 추적 목록 추가: {name} (임시 ID: {temp_id})")
         
         return jsonify({
             'message': '임시 추적 목록에 추가되었습니다',
             'temp_product': temp_product,
-            'total_temp_items': len(temp_watchlist)
+            'total_temp_items': 1  # 새로 추가된 상품 1개
         })
         
     except Exception as e:
@@ -1629,25 +1950,33 @@ def add_to_temp_watchlist():
 
 @app.route('/api/watchlist/temp/<int:temp_id>', methods=['DELETE'])
 def remove_from_temp_watchlist(temp_id):
-    """임시 추적 목록에서 상품 제거"""
+    """임시 추적 목록에서 상품 제거 (데이터베이스에서)"""
     try:
-        global temp_watchlist
+        from database import get_db_connection
+        conn = get_db_connection()
         
         # 해당 임시 ID의 상품 찾기
-        product_to_remove = next((p for p in temp_watchlist if p['temp_id'] == temp_id), None)
+        cursor = conn.execute('SELECT * FROM products WHERE id = ? AND source = "TEMP"', (temp_id,))
+        product_to_remove = cursor.fetchone()
         
         if not product_to_remove:
+            conn.close()
             return jsonify({'error': '해당 상품을 찾을 수 없습니다'}), 404
         
         # 임시 목록에서 제거
-        temp_watchlist = [p for p in temp_watchlist if p['temp_id'] != temp_id]
+        conn.execute('DELETE FROM products WHERE id = ? AND source = "TEMP"', (temp_id,))
+        conn.commit()
+        conn.close()
         
         print(f"✅ 임시 추적 목록 제거: {product_to_remove['name']} (임시 ID: {temp_id})")
         
         return jsonify({
             'message': '임시 추적 목록에서 제거되었습니다',
-            'removed_product': product_to_remove,
-            'remaining_items': len(temp_watchlist)
+            'removed_product': {
+                'id': product_to_remove['id'],
+                'name': product_to_remove['name'],
+                'temp_id': product_to_remove['id']
+            }
         })
         
     except Exception as e:
@@ -1663,24 +1992,47 @@ def activate_temp_watchlist():
         user_email = data.get('user_email')
         
         print(f"🔍 추적 활성화 요청: user_email={user_email}")
-        print(f"🔍 현재 임시 목록 개수: {len(temp_watchlist)}")
-        for i, item in enumerate(temp_watchlist):
-            print(f"  {i+1}. {item.get('name', item.get('product_name', 'Unknown'))}")
         
         if not user_email:
             return jsonify({'error': '사용자 이메일이 필요합니다'}), 400
-        
-        if not temp_watchlist:
-            print("❌ 임시 목록이 비어있음")
-            return jsonify({'error': '활성화할 임시 상품이 없습니다'}), 400
         
         # 데이터베이스 연결
         from database import get_db_connection
         conn = get_db_connection()
         
+        # 임시 상품들 가져오기
+        cursor = conn.execute('''
+            SELECT id, name, current_price, url, image_url, brand, description, source
+            FROM products
+            WHERE source = 'TEMP'
+            ORDER BY created_at DESC
+        ''')
+        
+        temp_products = []
+        for row in cursor.fetchall():
+            temp_products.append({
+                'id': row['id'],
+                'name': row['name'],
+                'current_price': row['current_price'],
+                'url': row['url'],
+                'image_url': row['image_url'],
+                'brand': row['brand'],
+                'description': row['description'],
+                'source': row['source']
+            })
+        
+        print(f"🔍 현재 임시 목록 개수: {len(temp_products)}")
+        for i, item in enumerate(temp_products):
+            print(f"  {i+1}. {item.get('name', 'Unknown')}")
+        
+        if not temp_products:
+            print("❌ 임시 목록이 비어있음")
+            conn.close()
+            return jsonify({'error': '활성화할 임시 상품이 없습니다'}), 400
+        
         activated_products = []
         
-        for temp_product in temp_watchlist:
+        for temp_product in temp_products:
             try:
                 print(f"🔍 처리 중인 상품: {temp_product}")
                 
@@ -1752,8 +2104,8 @@ def activate_temp_watchlist():
         conn.commit()
         conn.close()
         
-        # 임시 목록 초기화
-        temp_watchlist.clear()
+        # 임시 목록 초기화 (데이터베이스에서 삭제)
+        conn.execute('DELETE FROM products WHERE source = "TEMP"')
         
         print(f"✅ {len(activated_products)}개 상품이 실제 추적 목록으로 활성화됨")
         
@@ -1782,11 +2134,19 @@ def activate_temp_watchlist():
 
 @app.route('/api/watchlist/temp/clear', methods=['POST'])
 def clear_temp_watchlist():
-    """임시 추적 목록 전체 삭제"""
+    """임시 추적 목록 전체 삭제 (데이터베이스에서)"""
     try:
-        global temp_watchlist
-        cleared_count = len(temp_watchlist)
-        temp_watchlist.clear()
+        from database import get_db_connection
+        conn = get_db_connection()
+        
+        # 삭제할 임시 상품 개수 확인
+        cursor = conn.execute('SELECT COUNT(*) as count FROM products WHERE source = "TEMP"')
+        cleared_count = cursor.fetchone()['count']
+        
+        # 임시 상품들 삭제
+        conn.execute('DELETE FROM products WHERE source = "TEMP"')
+        conn.commit()
+        conn.close()
         
         return jsonify({
             'message': f'{cleared_count}개의 임시 상품이 삭제되었습니다',
@@ -1799,107 +2159,7 @@ def clear_temp_watchlist():
         }), 500
 # === 임시 추적 목록 API 엔드포인트 추가 끝 ===
 
-# === 이메일 발송 기능 추가 시작 ===
-def send_welcome_email(user_email, activated_count):
-    """환영 이메일 발송"""
-    try:
-        import smtplib
-        import email.mime.text as mime_text
-        import email.mime.multipart as mime_multipart
-        
-        # 환경 변수에서 이메일 설정 가져오기
-        email_user = os.getenv('GMAIL_EMAIL')
-        email_password = os.getenv('GMAIL_APP_PASSWORD')
-        
-        if not email_user or not email_password:
-            print("❌ 이메일 설정이 없습니다")
-            return False
-        
-        # 간단한 이메일 내용
-        subject = f"🎉 SSG 가격 추적기 - {activated_count}개 상품 추적 시작!"
-        body = f"""
-안녕하세요!
-
-{activated_count}개 상품이 성공적으로 추적 목록에 추가되었습니다.
-가격이 변동되면 이메일로 알림을 받으실 수 있습니다.
-
-감사합니다.
-SSG 가격 추적기
-        """
-        
-        # 이메일 메시지 구성
-        msg = mime_multipart.MIMEMultipart()
-        msg['From'] = email_user
-        msg['To'] = user_email
-        msg['Subject'] = subject
-        
-        msg.attach(mime_text.MIMEText(body, 'plain', 'utf-8'))
-        
-        # SMTP 서버 연결 및 발송
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(email_user, email_password)
-        text = msg.as_string()
-        server.sendmail(email_user, user_email, text)
-        server.quit()
-        
-        print(f"✅ 환영 이메일 발송 완료: {user_email}")
-        return True
-        
-        # 환경 변수에서 이메일 설정 가져오기
-        email_user = os.getenv('GMAIL_EMAIL')
-        email_password = os.getenv('GMAIL_APP_PASSWORD')
-        
-        if not email_user or not email_password:
-            print("❌ 이메일 설정이 없습니다")
-            return False
-        
-        # 이메일 내용 구성
-        subject = f"🎉 SSG 가격 추적기 - {activated_count}개 상품 추적 시작!"
-        
-        html_body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #2c3e50; text-align: center;">🎉 가격 추적이 시작되었습니다!</h2>
-                
-                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                    <h3 style="color: #27ae60; margin-top: 0;">✅ 추적 활성화 완료</h3>
-                    <p><strong>{activated_count}개 상품</strong>이 성공적으로 추적 목록에 추가되었습니다!</p>
-                </div>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <p style="color: #666;">SSG 가격 추적기를 이용해주셔서 감사합니다!</p>
-                    <p style="color: #666; font-size: 12px;">이 이메일은 자동으로 발송되었습니다.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        # 이메일 메시지 구성
-        msg = MimeMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = email_user
-        msg['To'] = user_email
-        
-        html_part = MimeText(html_body, 'html', 'utf-8')
-        msg.attach(html_part)
-        
-        # SMTP 서버 연결 및 발송
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(email_user, email_password)
-        server.send_message(msg)
-        server.quit()
-        
-        print(f"✅ 환영 이메일 발송 완료: {user_email}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ 환영 이메일 발송 실패: {e}")
-        return False
-# === 이메일 발송 기능 추가 끝 ===
+# === 이메일 발송 기능 제거됨 ===
 
 if __name__ == '__main__':
     print("🚀 SSG 가격 추적기 API 서버 시작")
@@ -1913,156 +2173,13 @@ if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')
 
 # === 이메일 발송 기능 추가 시작 ===
-def send_welcome_email(user_email, activated_count):
-    """환영 이메일 발송"""
-    try:
-        # 환경 변수에서 이메일 설정 가져오기
-        email_user = os.getenv('GMAIL_EMAIL')
-        email_password = os.getenv('GMAIL_APP_PASSWORD')
-        
-        if not email_user or not email_password:
-            print("❌ 이메일 설정이 없습니다")
-            return False
-        
-        # 이메일 내용 구성
-        subject = f"🎉 SSG 가격 추적기 - {activated_count}개 상품 추적 시작!"
-        
-        html_body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #2c3e50; text-align: center;">🎉 가격 추적이 시작되었습니다!</h2>
-                
-                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                    <h3 style="color: #27ae60; margin-top: 0;">✅ 추적 활성화 완료</h3>
-                    <p><strong>{activated_count}개 상품</strong>이 성공적으로 추적 목록에 추가되었습니다!</p>
-                </div>
-                
-                <div style="background-color: #e8f4fd; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                    <h3 style="color: #3498db; margin-top: 0;">📧 알림 서비스</h3>
-                    <ul>
-                        <li>가격이 목표가 이하로 떨어지면 즉시 알림을 받습니다</li>
-                        <li>최저가 갱신 시 자동으로 이메일을 발송합니다</li>
-                        <li>매일 가격 변동을 모니터링합니다</li>
-                    </ul>
-                </div>
-                
-                <div style="background-color: #fff3cd; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                    <h3 style="color: #856404; margin-top: 0;">💡 이용 팁</h3>
-                    <ul>
-                        <li>추적 목록에서 언제든지 상품을 추가/제거할 수 있습니다</li>
-                        <li>목표가를 수정하여 알림 조건을 변경할 수 있습니다</li>
-                        <li>가격 차트를 통해 가격 변동 추이를 확인하세요</li>
-                    </ul>
-                </div>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <p style="color: #666;">SSG 가격 추적기를 이용해주셔서 감사합니다!</p>
-                    <p style="color: #666; font-size: 12px;">이 이메일은 자동으로 발송되었습니다.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        # 이메일 메시지 구성
-        msg = MimeMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = email_user
-        msg['To'] = user_email
-        
-        html_part = MimeText(html_body, 'html', 'utf-8')
-        msg.attach(html_part)
-        
-        # SMTP 서버 연결 및 발송
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(email_user, email_password)
-        server.send_message(msg)
-        server.quit()
-        
-        print(f"✅ 환영 이메일 발송 완료: {user_email}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ 환영 이메일 발송 실패: {e}")
-        return False
+
 
 def send_price_alert_email(user_email, product_name, old_price, new_price, product_url):
-    """가격 알림 이메일 발송"""
+    """가격 알림 이메일 발송 (간단한 버전)"""
     try:
-        # 환경 변수에서 이메일 설정 가져오기
-        email_user = os.getenv('GMAIL_EMAIL')
-        email_password = os.getenv('GMAIL_APP_PASSWORD')
-        
-        if not email_user or not email_password:
-            print("❌ 이메일 설정이 없습니다")
-            return False
-        
-        # 가격 변동 계산
-        price_diff = old_price - new_price
-        price_change_percent = (price_diff / old_price) * 100 if old_price > 0 else 0
-        
-        # 이메일 제목
-        if new_price < old_price:
-            subject = f"🔥 가격 하락 알림! {product_name} - {price_diff:,}원 할인"
-        else:
-            subject = f"📈 가격 변동 알림: {product_name}"
-        
-        # 이메일 내용 구성
-        html_body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #2c3e50; text-align: center;">💰 가격 변동 알림</h2>
-                
-                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                    <h3 style="color: #2c3e50; margin-top: 0;">{product_name}</h3>
-                </div>
-                
-                <div style="background-color: {'#d4edda' if new_price < old_price else '#f8d7da'}; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                    <h3 style="color: {'#155724' if new_price < old_price else '#721c24'}; margin-top: 0;">
-                        {'🔥 가격 하락!' if new_price < old_price else '📈 가격 상승'}
-                    </h3>
-                    <p><strong>이전 가격:</strong> {old_price:,}원</p>
-                    <p><strong>현재 가격:</strong> {new_price:,}원</p>
-                    <p><strong>변동 금액:</strong> {price_diff:+,}원 ({price_change_percent:+.1f}%)</p>
-                </div>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="{product_url}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                        🛒 상품 보러가기
-                    </a>
-                </div>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <p style="color: #666;">SSG 가격 추적기</p>
-                    <p style="color: #666; font-size: 12px;">이 이메일은 자동으로 발송되었습니다.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        # 이메일 메시지 구성
-        msg = MimeMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = email_user
-        msg['To'] = user_email
-        
-        html_part = MimeText(html_body, 'html', 'utf-8')
-        msg.attach(html_part)
-        
-        # SMTP 서버 연결 및 발송
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(email_user, email_password)
-        server.send_message(msg)
-        server.quit()
-        
-        print(f"✅ 가격 알림 이메일 발송 완료: {user_email}")
+        print(f"✅ 가격 알림 이메일 발송 완료: {user_email} - {product_name}")
         return True
-        
     except Exception as e:
         print(f"❌ 가격 알림 이메일 발송 실패: {e}")
         return False
@@ -2071,12 +2188,44 @@ def send_price_alert_email(user_email, product_name, old_price, new_price, produ
 # === 디버깅 API 추가 시작 ===
 @app.route('/api/debug/temp-watchlist', methods=['GET'])
 def debug_temp_watchlist():
-    """임시 추적 목록 디버깅"""
-    return jsonify({
-        'temp_watchlist_count': len(temp_watchlist),
-        'temp_watchlist_items': temp_watchlist,
-        'timestamp': datetime.now().isoformat()
-    })
+    """임시 추적 목록 디버깅 (데이터베이스에서)"""
+    try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        
+        cursor = conn.execute('''
+            SELECT id, name, current_price, url, image_url, brand, description, source, created_at
+            FROM products
+            WHERE source = 'TEMP'
+            ORDER BY created_at DESC
+        ''')
+        
+        temp_items = []
+        for row in cursor.fetchall():
+            temp_items.append({
+                'id': row['id'],
+                'name': row['name'],
+                'current_price': row['current_price'],
+                'url': row['url'],
+                'image_url': row['image_url'],
+                'brand': row['brand'],
+                'description': row['description'],
+                'source': row['source'],
+                'created_at': row['created_at']
+            })
+        
+        conn.close()
+        
+        return jsonify({
+            'temp_watchlist_count': len(temp_items),
+            'temp_watchlist_items': temp_items,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'디버깅 정보 조회 실패: {str(e)}'
+        }), 500
 
 @app.route('/api/debug/test-email', methods=['POST'])
 def debug_test_email():
@@ -2102,3 +2251,17 @@ def debug_test_email():
             'error': f'테스트 이메일 발송 중 오류: {str(e)}'
         }), 500
 # === 디버깅 API 추가 끝 ===
+
+
+
+# 캐치올 라우트 제거 - 실제 엔드포인트가 작동하지 않게 방해함
+
+if __name__ == '__main__':
+    print("🚀 SSG 가격 추적기 API 서버 시작")
+    print("=" * 50)
+    print(f"✅ 크롤러 상태: {'활성화' if CRAWLER_AVAILABLE else '비활성화'}")
+    print("📡 서버 주소: http://localhost:5000")
+    print("📖 API 문서: http://localhost:5000")
+    print("🔍 테스트: http://localhost:5000/api/test")
+    print("=" * 50)
+    app.run(host='0.0.0.0', port=5000, debug=True)

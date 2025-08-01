@@ -17,7 +17,6 @@ try:
     AIOHTTP_AVAILABLE = True
 except ImportError:
     AIOHTTP_AVAILABLE = False
-    print("⚠️ aiohttp 라이브러리가 없습니다. 동기 방식을 사용합니다.")
 
 try:
     from database_models import Product, SessionLocal, get_db
@@ -25,7 +24,6 @@ try:
     DATABASE_AVAILABLE = True
 except ImportError:
     DATABASE_AVAILABLE = False
-    print("⚠️ SQLAlchemy 라이브러리가 없습니다. 데이터베이스 기능을 비활성화합니다.")
 
 try:
     from cache_manager import cache_manager
@@ -155,13 +153,28 @@ class AsyncSSGCrawler:
             # 모든 작업 병렬 실행
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # 성공한 결과만 필터링
+            # 성공한 결과만 필터링하고 중복 제거
             products = []
+            seen_urls = set()
+            seen_names = set()
+            
             for result in results:
                 if isinstance(result, dict) and result.get('name'):
-                    products.append(result)
-                    if len(products) >= limit:
-                        break
+                    # URL과 이름으로 중복 체크
+                    url = result.get('url', '')
+                    name = result.get('name', '').strip()
+                    
+                    # 중복 체크 (URL 또는 이름이 같으면 제외)
+                    if (url not in seen_urls and 
+                        name not in seen_names and 
+                        len(name) > 5):
+                        
+                        products.append(result)
+                        seen_urls.add(url)
+                        seen_names.add(name)
+                        
+                        if len(products) >= limit:
+                            break
             
             elapsed_time = time.time() - start_time
             print(f"⚡ 비동기 크롤링 완료: {elapsed_time:.2f}초, {len(products)}개 상품")
