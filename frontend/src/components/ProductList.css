@@ -212,4 +212,33 @@
   .products-grid {
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   }
+}/
+* ========== 삭제 버튼 스타일 시작 ========== */
+.product-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
 }
+
+.delete-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+  opacity: 0.7;
+}
+
+.delete-btn:hover {
+  background-color: rgba(255, 0, 0, 0.1);
+  opacity: 1;
+}
+
+.view-link {
+  flex: 1;
+  margin-right: 10px;
+}
+/* ========== 삭제 버튼 스타일 끝 ========== */

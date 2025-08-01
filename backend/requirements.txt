@@ -3,3 +3,11 @@ Flask-CORS==4.0.0
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
+aiohttp==3.9.1
+redis==5.0.1
+sqlalchemy==2.0.23
+pytest==7.4.0
+# === 가격 추적 기능 의존성 추가 시작 ===
+python-dotenv==1.0.0
+schedule==1.2.0
+# === 가격 추적 기능 의존성 추가 끝 ===
