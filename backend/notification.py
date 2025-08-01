@@ -4,16 +4,33 @@ from email.mime.multipart import MIMEMultipart
 from database import get_db_connection
 import threading
 import time
+import os
+from dotenv import load_dotenv
 
-# 이메일 설정 (실제 사용시 환경변수로 관리)
+# 환경 변수 로드 (상위 디렉토리의 .env 파일 로드)
+env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(env_path)
+
+# 환경 변수가 로드되지 않으면 직접 설정
+if not os.getenv('GMAIL_EMAIL'):
+    os.environ['GMAIL_EMAIL'] = 'rudwnd88@gmail.com'
+if not os.getenv('GMAIL_APP_PASSWORD'):
+    os.environ['GMAIL_APP_PASSWORD'] = 'egqm ksig wqzi fvti'
+
+# 이메일 설정 (환경변수에서 로드)
 SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587
-EMAIL_ADDRESS = 'your-email@gmail.com'  # 실제 이메일로 변경
-EMAIL_PASSWORD = 'your-app-password'    # Gmail 앱 비밀번호
+EMAIL_ADDRESS = os.getenv('GMAIL_EMAIL')
+EMAIL_PASSWORD = os.getenv('GMAIL_APP_PASSWORD')
 
 def send_email(to_email, subject, body):
     """이메일 발송"""
     try:
+        # 환경 변수 확인
+        if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+            print("이메일 설정이 완료되지 않았습니다. .env 파일을 확인해주세요.")
+            return False
+            
         msg = MIMEMultipart()
         msg['From'] = EMAIL_ADDRESS
         msg['To'] = to_email
@@ -93,5 +110,18 @@ def start_notification_scheduler():
 
 if __name__ == '__main__':
     # 테스트 이메일 발송
-    test_email = "test@example.com"
-    send_email(test_email, "테스트", "알림 시스템 테스트입니다.")
+    test_email = "rudwnd88@gmail.com"  # 실제 이메일 주소로 변경
+    subject = "[SSG 가격 트래커] 이메일 발송 테스트"
+    body = """
+    <html>
+    <body>
+        <h2>SSG 가격 트래커 이메일 테스트</h2>
+        <p>안녕하세요!</p>
+        <p>SSG 가격 트래커의 이메일 발송 기능이 정상적으로 작동하고 있습니다.</p>
+        <p>이제 가격 알림을 받을 수 있습니다.</p>
+        <br>
+        <p>감사합니다.</p>
+    </body>
+    </html>
+    """
+    send_email(test_email, subject, body)

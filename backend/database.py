@@ -7,6 +7,10 @@ def get_db_connection():
     """데이터베이스 연결"""
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
+    
+    # 한국 시간대 설정
+    conn.execute("PRAGMA timezone = '+09:00'")
+    
     return conn
 
 def init_db():
@@ -25,15 +29,16 @@ def init_db():
             current_price INTEGER,
             image_url TEXT,
             brand TEXT,
+            description TEXT,
             source TEXT DEFAULT 'SSG',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT (datetime('now', '+09:00'))
         );
         
         CREATE TABLE IF NOT EXISTS price_logs (
             id INTEGER PRIMARY KEY,
             product_id INTEGER,
             price INTEGER,
-            logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            logged_at TIMESTAMP DEFAULT (datetime('now', '+09:00')),
             FOREIGN KEY (product_id) REFERENCES products(id)
         );
         
@@ -59,7 +64,17 @@ def init_db():
         pass
     
     try:
+        conn.execute('ALTER TABLE products ADD COLUMN description TEXT')
+    except:
+        pass
+    
+    try:
         conn.execute('ALTER TABLE products ADD COLUMN source TEXT DEFAULT "SSG"')
+    except:
+        pass
+    
+    try:
+        conn.execute('ALTER TABLE products ADD COLUMN updated_at TIMESTAMP')
     except:
         pass
     
